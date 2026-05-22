@@ -1,0 +1,18 @@
+{
+  "name": "delta-shipping",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api start:dev",
+    "build": "pnpm -r run build",
+    "db:check-dns": "bash scripts/check-docker-registry-dns.sh",
+    "db:up": "bash scripts/check-docker-registry-dns.sh && docker compose up -d postgres redis",
+    "db:migrate": "pnpm --filter api exec prisma db execute --schema prisma/schema.prisma --file prisma/ensure-user-ui-preferences.sql",
+    "db:down": "docker compose down",
+    "db:redis": "docker compose up -d redis",
+    "db:reset": "docker compose down -v && docker compose up -d postgres",
+    "lint": "pnpm -r run lint"
+  }
+}

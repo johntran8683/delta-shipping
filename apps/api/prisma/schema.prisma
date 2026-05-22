@@ -1,0 +1,434 @@
+// Prisma schema aligned with /schema-v1.sql (PostgreSQL)
+// After DB is up: `pnpm exec prisma generate` (from apps/api)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum dn_status {
+  IMPORTED
+  PRIORITIZED
+  PICKING
+  PICKED
+  PACKING
+  PACKED
+  SHIPPING_IN_PROGRESS
+  SHIPPED
+  ON_HOLD
+  CANCELLED
+}
+
+enum batch_status {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum source_type {
+  DAILY_DN
+  SHIPPING_IDS
+}
+
+enum error_severity {
+  BLOCKER
+  WARNING
+  INFO
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(30)
+  name        String   @db.VarChar(100)
+  description String?
+  sort_order  Int      @default(0)
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  user_roles       UserRole[]
+  role_permissions RolePermission[]
+  dn_status_actor  DnStatusHistory[] @relation("StatusActorRole")
+  dn_priority_actor DnPriorityHistory[] @relation("PriorityActorRole")
+  dn_rush_actor     DnRushHistory[]     @relation("RushActorRole")
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(80)
+  description String?
+  created_at  DateTime @default(now())
+
+  role_permissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  role_id        String @db.Uuid
+  permission_id  String @db.Uuid
+  role           Role       @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  permission     Permission @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+
+  @@id([role_id, permission_id])
+  @@index([permission_id])
+  @@map("role_permissions")
+}
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique @db.VarChar(255)
+  display_name  String?  @db.VarChar(255)
+  password_hash String?  @db.VarChar(255)
+  must_change_password Boolean @default(false)
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  user_roles_assigned    UserRole[] @relation("UserRoleUser")
+  user_roles_granted     UserRole[] @relation("UserRoleAssignedBy")
+  ui_preference          UserUiPreference?
+  import_batches_created ImportBatch[]
+  dn_status_history      DnStatusHistory[]
+  dn_priority_history    DnPriorityHistory[]
+  dn_rush_history          DnRushHistory[]
+  shipments              Shipment[]
+  picking_claimed_delivery_notes DeliveryNote[] @relation("PickingStartedBy")
+  pack_sessions_created          PackSession[]
+
+  @@map("users")
+}
+
+model UserRole {
+  user_id     String   @db.Uuid
+  role_id     String   @db.Uuid
+  assigned_at DateTime @default(now())
+  assigned_by String?  @db.Uuid
+
+  user       User @relation("UserRoleUser", fields: [user_id], references: [id], onDelete: Cascade)
+  role       Role @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  assignedBy User? @relation("UserRoleAssignedBy", fields: [assigned_by], references: [id], onDelete: SetNull)
+
+  @@id([user_id, role_id])
+  @@index([role_id])
+  @@map("user_roles")
+}
+
+model UserUiPreference {
+  user_id                        String   @id @db.Uuid
+  delivery_notes_visible_columns Json?
+  updated_at                     DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("user_ui_preferences")
+}
+
+model ImportBatch {
+  id             String       @id @default(uuid()) @db.Uuid
+  source_type    source_type
+  file_name      String       @db.VarChar(255)
+  file_checksum  String?      @db.VarChar(128)
+  started_at     DateTime     @default(now())
+  completed_at   DateTime?
+  status         batch_status @default(RUNNING)
+  total_rows     Int          @default(0)
+  success_rows   Int          @default(0)
+  error_rows     Int          @default(0)
+  created_by     String?      @db.Uuid
+  summary_message String?
+
+  creator          User?             @relation(fields: [created_by], references: [id], onDelete: SetNull)
+  row_errors       ImportRowError[]
+  delivery_notes   DeliveryNote[]
+
+  @@map("import_batches")
+}
+
+model ImportRowError {
+  id            String         @id @default(uuid()) @db.Uuid
+  batch_id      String         @db.Uuid
+  sheet_name    String?        @db.VarChar(120)
+  row_number    Int?
+  error_code    String         @db.VarChar(60)
+  severity      error_severity @default(BLOCKER)
+  error_message String
+  raw_row_json  Json?
+  created_at    DateTime       @default(now())
+
+  batch ImportBatch @relation(fields: [batch_id], references: [id], onDelete: Cascade)
+
+  @@index([batch_id])
+  @@map("import_row_errors")
+}
+
+model Customer {
+  id                   String   @id @default(uuid()) @db.Uuid
+  sold_to_code         String   @unique @db.VarChar(30)
+  sold_to_name         String   @db.VarChar(255)
+  fed_id_number        String?  @db.VarChar(50)
+  default_contact_name String?  @db.VarChar(120)
+  default_phone        String?  @db.VarChar(50)
+  default_email        String?  @db.VarChar(255)
+  shipping_preference  String?
+  is_active            Boolean  @default(true)
+  /// When true, picker combine-with hints exclude this customer's DNs from clusters.
+  dn_combine_hints_disallowed Boolean @default(false)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  ship_to_locations        ShipToLocation[]
+  customer_carrier_accounts CustomerCarrierAccount[]
+  delivery_notes           DeliveryNote[]
+
+  @@map("customers")
+}
+
+model ShipToLocation {
+  id            String   @id @default(uuid()) @db.Uuid
+  customer_id   String   @db.Uuid
+  ship_to_code  String   @db.VarChar(30)
+  ship_to_name  String   @db.VarChar(255)
+  street1       String?  @db.VarChar(255)
+  street2       String?  @db.VarChar(255)
+  city          String?  @db.VarChar(120)
+  state_region  String?  @db.VarChar(120)
+  postal_code   String?  @db.VarChar(30)
+  country_code  String?  @db.VarChar(10)
+  country_name  String?  @db.VarChar(120)
+  contact_name  String?  @db.VarChar(120)
+  phone         String?  @db.VarChar(50)
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  customer       Customer       @relation(fields: [customer_id], references: [id], onDelete: Restrict)
+  delivery_notes DeliveryNote[]
+
+  @@unique([customer_id, ship_to_code])
+  @@index([customer_id])
+  @@map("ship_to_locations")
+}
+
+model CustomerCarrierAccount {
+  id                String   @id @default(uuid()) @db.Uuid
+  customer_id       String   @db.Uuid
+  carrier_code      String   @db.VarChar(30)
+  account_number    String   @db.VarChar(80)
+  is_collect_enabled Boolean @default(true)
+  notes             String?
+  is_active         Boolean  @default(true)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  customer Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+
+  @@unique([customer_id, carrier_code, account_number])
+  @@index([customer_id])
+  @@map("customer_carrier_accounts")
+}
+
+model DeliveryNote {
+  id                       String    @id @default(uuid()) @db.Uuid
+  dn_number                String    @unique @db.VarChar(30)
+  sold_to_code             String    @db.VarChar(30)
+  ship_to_code             String    @db.VarChar(30)
+  customer_id              String?   @db.Uuid
+  ship_to_location_id      String?   @db.Uuid
+  current_priority_no      Int?
+  is_rushed                Boolean   @default(false)
+  latest_rush_reason       String?
+  current_status           dn_status @default(IMPORTED)
+  credit_status            String?   @db.VarChar(10)
+  shipping_type            String?   @db.VarChar(120)
+  currency_code            String?   @db.VarChar(10)
+  dn_create_date           DateTime? @db.Date
+  requested_delivery_date  DateTime? @db.Date
+  projected_ship_date      DateTime? @db.Date
+  po_date                  DateTime? @db.Date
+  customer_po              String?   @db.VarChar(80)
+  ship_to_region_state     String?   @db.VarChar(120)
+  picking_started_by_user_id String? @db.Uuid
+  last_seen_import_batch_id String   @db.Uuid
+  is_open                  Boolean   @default(true)
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @updatedAt
+
+  customer              Customer?      @relation(fields: [customer_id], references: [id], onDelete: Restrict)
+  ship_to_location      ShipToLocation? @relation(fields: [ship_to_location_id], references: [id], onDelete: Restrict)
+  picking_started_by    User?          @relation("PickingStartedBy", fields: [picking_started_by_user_id], references: [id], onDelete: SetNull)
+  last_seen_import_batch ImportBatch @relation(fields: [last_seen_import_batch_id], references: [id], onDelete: Restrict)
+  lines                 DeliveryNoteLine[]
+  status_history        DnStatusHistory[]
+  priority_history      DnPriorityHistory[]
+  rush_history          DnRushHistory[]
+  shipments             Shipment[]
+  pack_session_memberships PackSessionDeliveryNote[]
+
+  @@index([current_status, current_priority_no])
+  @@index([is_rushed])
+  @@index([is_open])
+  @@index([sold_to_code, ship_to_code])
+  @@index([picking_started_by_user_id, current_status])
+  @@map("delivery_notes")
+}
+
+model DeliveryNoteLine {
+  id                 String    @id @default(uuid()) @db.Uuid
+  delivery_note_id   String    @db.Uuid
+  doc_item           Int
+  so_number          String?   @db.VarChar(30)
+  material_code      String?   @db.VarChar(80)
+  material_description String?
+  order_qty          Decimal?  @db.Decimal(18, 4)
+  open_qty           Decimal?  @db.Decimal(18, 4)
+  shipped_qty        Decimal?  @db.Decimal(18, 4)
+  unit_price         Decimal?  @db.Decimal(18, 4)
+  line_amount        Decimal?  @db.Decimal(18, 4)
+  delivery_date      DateTime? @db.Date
+  material_type      String?   @db.VarChar(40)
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  delivery_note DeliveryNote @relation(fields: [delivery_note_id], references: [id], onDelete: Cascade)
+
+  @@unique([delivery_note_id, doc_item])
+  @@index([delivery_note_id])
+  @@map("delivery_note_lines")
+}
+
+model DnStatusHistory {
+  id                String    @id @default(uuid()) @db.Uuid
+  delivery_note_id  String    @db.Uuid
+  from_status       dn_status?
+  to_status         dn_status
+  message           String?
+  actor_user_id     String    @db.Uuid
+  actor_role_id     String    @db.Uuid
+  changed_at        DateTime  @default(now())
+  source            String    @default("MANUAL") @db.VarChar(20)
+
+  delivery_note DeliveryNote @relation(fields: [delivery_note_id], references: [id], onDelete: Cascade)
+  actor_user    User         @relation(fields: [actor_user_id], references: [id], onDelete: Restrict)
+  actor_role    Role         @relation("StatusActorRole", fields: [actor_role_id], references: [id], onDelete: Restrict)
+
+  @@index([delivery_note_id, changed_at(sort: Desc)])
+  @@index([actor_user_id, actor_role_id, changed_at(sort: Desc)])
+  @@map("dn_status_history")
+}
+
+model DnPriorityHistory {
+  id                String   @id @default(uuid()) @db.Uuid
+  delivery_note_id  String   @db.Uuid
+  from_priority_no  Int?
+  to_priority_no    Int
+  reason            String?
+  actor_user_id     String   @db.Uuid
+  actor_role_id     String?  @db.Uuid
+  changed_at        DateTime @default(now())
+  source            String   @default("MANUAL") @db.VarChar(20)
+
+  delivery_note DeliveryNote @relation(fields: [delivery_note_id], references: [id], onDelete: Cascade)
+  actor_user    User         @relation(fields: [actor_user_id], references: [id], onDelete: Restrict)
+  actor_role    Role?        @relation("PriorityActorRole", fields: [actor_role_id], references: [id], onDelete: SetNull)
+
+  @@index([delivery_note_id, changed_at(sort: Desc)])
+  @@map("dn_priority_history")
+}
+
+model DnRushHistory {
+  id               String   @id @default(uuid()) @db.Uuid
+  delivery_note_id String   @db.Uuid
+  from_rushed      Boolean
+  to_rushed        Boolean
+  reason           String
+  actor_user_id    String   @db.Uuid
+  actor_role_id    String?  @db.Uuid
+  changed_at       DateTime @default(now())
+  source           String   @default("MANUAL") @db.VarChar(20)
+
+  delivery_note DeliveryNote @relation(fields: [delivery_note_id], references: [id], onDelete: Cascade)
+  actor_user    User         @relation(fields: [actor_user_id], references: [id], onDelete: Restrict)
+  actor_role    Role?        @relation("RushActorRole", fields: [actor_role_id], references: [id], onDelete: SetNull)
+
+  @@index([delivery_note_id, changed_at(sort: Desc)])
+  @@map("dn_rush_history")
+}
+
+model Shipment {
+  id                     String   @id @default(uuid()) @db.Uuid
+  delivery_note_id       String   @db.Uuid
+  carrier_code           String   @db.VarChar(30)
+  service_level          String?  @db.VarChar(80)
+  payment_method         String   @db.VarChar(20)
+  collect_account_number String?  @db.VarChar(80)
+  tracking_number        String?  @db.VarChar(80)
+  shipment_reference     String?  @db.VarChar(120)
+  ship_date              DateTime @db.Date
+  shipper_user_id        String   @db.Uuid
+  notes                  String?
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+
+  delivery_note DeliveryNote @relation(fields: [delivery_note_id], references: [id], onDelete: Cascade)
+  shipper       User         @relation(fields: [shipper_user_id], references: [id], onDelete: Restrict)
+
+  @@index([delivery_note_id])
+  @@index([tracking_number])
+  @@map("shipments")
+}
+
+/// One packing operation: one or more DNs (combined or single) moved PICKED→PACKING together, then PACKED with one or more boxes.
+model PackSession {
+  id                 String    @id @default(uuid()) @db.Uuid
+  created_by_user_id String    @db.Uuid
+  created_at         DateTime  @default(now())
+  completed_at       DateTime?
+  /// Free-text note from packer when marking the session packed (e.g. cart label).
+  pack_completion_note String? @db.Text
+
+  creator        User                       @relation(fields: [created_by_user_id], references: [id], onDelete: Restrict)
+  delivery_notes PackSessionDeliveryNote[]
+  boxes          PackBox[]
+
+  @@index([created_by_user_id])
+  @@index([completed_at])
+  @@map("pack_sessions")
+}
+
+model PackSessionDeliveryNote {
+  pack_session_id  String   @db.Uuid
+  delivery_note_id String   @db.Uuid
+  created_at       DateTime @default(now())
+
+  pack_session  PackSession  @relation(fields: [pack_session_id], references: [id], onDelete: Cascade)
+  delivery_note DeliveryNote @relation(fields: [delivery_note_id], references: [id], onDelete: Cascade)
+
+  @@id([pack_session_id, delivery_note_id])
+  @@index([delivery_note_id])
+  @@map("pack_session_delivery_notes")
+}
+
+model PackBox {
+  id              String   @id @default(uuid()) @db.Uuid
+  pack_session_id String   @db.Uuid
+  sort_order      Int      @default(0)
+  box_number      String?  @db.VarChar(80)
+  weight_lb       Decimal  @db.Decimal(12, 4)
+  length_in       Decimal  @db.Decimal(12, 4)
+  width_in        Decimal  @db.Decimal(12, 4)
+  height_in       Decimal  @db.Decimal(12, 4)
+  created_at      DateTime @default(now())
+
+  pack_session PackSession @relation(fields: [pack_session_id], references: [id], onDelete: Cascade)
+
+  @@index([pack_session_id, sort_order])
+  @@map("pack_boxes")
+}

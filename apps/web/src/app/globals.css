@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+/* Sampled from Delta-Controls-Logo-2024-RGB (white + red on black) */
+:root {
+  --delta-red: #ea0b2a;
+  --delta-red-hover: #c40924;
+  --delta-black: #000000;
+  --delta-white: #ffffff;
+
+  --background: #f2f2f3;
+  --foreground: #0a0a0a;
+  --app-canvas: #f2f2f3;
+  --app-fg: #0a0a0a;
+  --app-surface: #ffffff;
+  --app-border: rgb(0 0 0 / 0.08);
+  --app-brand: var(--delta-red);
+  --app-brand-hover: var(--delta-red-hover);
+  --app-header-shadow: 0 1px 0 rgb(0 0 0 / 0.06);
+
+  --app-sidebar-bg: var(--delta-black);
+  --app-sidebar-fg: var(--delta-white);
+  --app-sidebar-muted: rgb(255 255 255 / 0.62);
+  --app-sidebar-border: rgb(255 255 255 / 0.1);
+  --app-sidebar-hover: rgb(255 255 255 / 0.08);
+  --app-sidebar-active: var(--delta-red);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #121212;
+    --foreground: #f2f2f2;
+    --app-canvas: #161616;
+    --app-fg: #f2f2f2;
+    --app-surface: #1c1c1c;
+    --app-border: rgb(255 255 255 / 0.1);
+    --app-brand: var(--delta-red);
+    --app-brand-hover: #ff2a47;
+    --app-header-shadow: 0 1px 0 rgb(0 0 0 / 0.4);
+
+    --app-sidebar-bg: var(--delta-black);
+    --app-sidebar-fg: var(--delta-white);
+    --app-sidebar-muted: rgb(255 255 255 / 0.58);
+    --app-sidebar-border: rgb(255 255 255 / 0.1);
+    --app-sidebar-hover: rgb(255 255 255 / 0.08);
+    --app-sidebar-active: var(--delta-red);
+  }
+}
+
+body {
+  background: var(--app-canvas);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Primary actions — Delta red (use on main content, not destructive errors) */
+.btn-delta-primary {
+  background-color: var(--app-brand);
+  color: var(--delta-white);
+}
+.btn-delta-primary:hover:not(:disabled) {
+  background-color: var(--app-brand-hover);
+}
+.btn-delta-primary:focus-visible {
+  outline: 2px solid var(--app-brand);
+  outline-offset: 2px;
+}

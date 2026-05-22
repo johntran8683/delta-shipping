@@ -1,0 +1,16 @@
+node_modules
+dist
+.next
+.turbo
+*.log
+.env
+.env.local
+.env.*.local
+apps/api/.env
+apps/web/.env.local
+coverage
+
+# Local Excel fixtures at repo root (optional; remove this block to commit test workbooks)
+/*.xlsm
+/*.xlsx
+.DS_Store

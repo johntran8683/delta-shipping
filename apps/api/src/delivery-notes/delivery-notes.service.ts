@@ -1,0 +1,1999 @@
+import { randomUUID } from 'node:crypto';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma, dn_status } from '@prisma/client';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import type { JwtPayload } from '../auth/jwt-payload';
+import { PermissionsService } from '../auth/permissions.service';
+import { PrismaService } from '../prisma/prisma.service';
+/** CJS-only package: default import emits `.default`, which breaks at runtime. */
+import PDFKit = require('pdfkit');
+import {
+  filterCarrierAccountsForShippingType,
+  inferCarrierCodeFromShippingType,
+} from './carrier-match';
+import { attachDeliveryNoteStatusContexts } from './delivery-notes-status-context';
+import { buildDeliveryNoteListOrderBy } from './delivery-notes-list-sort';
+import {
+  deliveryNoteEligibleForRush,
+  rushMarkBlockedMessage,
+} from './dn-rush.policy';
+import { ALL_DN_STATUSES, getTransitionMeta } from './dn-transition.policy';
+import {
+  DELIVERY_NOTE_STATS_TIMEZONE,
+  getVancouverDayBoundsUtc,
+} from './delivery-note-stats';
+import type { CompletePackDto } from './dto/complete-pack.dto';
+import type { ListDeliveryNotesQueryDto } from './dto/list-delivery-notes.query.dto';
+import type { StartPackDto } from './dto/start-pack.dto';
+
+type WorkflowActorRow = {
+  id: string;
+  email: string;
+  display_name: string | null;
+};
+
+type WorkflowStatusHistoryRow = {
+  to_status: dn_status;
+  actor_user: WorkflowActorRow;
+};
+
+@Injectable()
+export class DeliveryNotesService {
+  private readonly logger = new Logger(DeliveryNotesService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly permissions: PermissionsService,
+  ) {}
+
+  async list(query: ListDeliveryNotesQueryDto, currentUserId?: string) {
+    const normalizeCode = (value: string | null | undefined): string => {
+      const raw = (value ?? '').trim().toUpperCase();
+      if (!raw) return '';
+      if (/^\d+$/.test(raw)) {
+        return raw.replace(/^0+/, '') || '0';
+      }
+      return raw;
+    };
+
+    const pageSize = Math.min(query.pageSize ?? query.limit ?? 50, 200);
+    const page = Math.max(query.page ?? 1, 1);
+    const skip = (page - 1) * pageSize;
+
+    const conditions: Prisma.DeliveryNoteWhereInput[] = [];
+    const shippedTodayFilter =
+      !query.myPicking && query.status === dn_status.SHIPPED;
+
+    if (!shippedTodayFilter) {
+      if (query.is_open === undefined) {
+        conditions.push({ is_open: true });
+      } else {
+        conditions.push({ is_open: query.is_open });
+      }
+    }
+
+    if (query.myPicking) {
+      if (!currentUserId?.trim()) {
+        throw new BadRequestException(
+          'myPicking requires an authenticated user',
+        );
+      }
+      conditions.push({
+        current_status: dn_status.PICKING,
+        picking_started_by_user_id: currentUserId,
+      });
+    } else if (shippedTodayFilter) {
+      const { startUtc, endUtc } = getVancouverDayBoundsUtc();
+      conditions.push({
+        status_history: {
+          some: {
+            to_status: dn_status.SHIPPED,
+            changed_at: { gte: startUtc, lt: endUtc },
+          },
+        },
+      });
+    } else if (query.status) {
+      conditions.push({ current_status: query.status });
+    }
+
+    const dnNumber = query.dnNumber?.trim();
+    if (dnNumber) {
+      conditions.push({
+        dn_number: { contains: dnNumber, mode: 'insensitive' },
+      });
+    }
+
+    const customer = query.customer?.trim();
+    if (customer) {
+      conditions.push({
+        OR: [
+          { sold_to_code: { contains: customer, mode: 'insensitive' } },
+          {
+            customer: {
+              sold_to_name: { contains: customer, mode: 'insensitive' },
+            },
+          },
+          {
+            customer: {
+              sold_to_code: { contains: customer, mode: 'insensitive' },
+            },
+          },
+        ],
+      });
+    }
+
+    const shipTo = query.shipTo?.trim();
+    if (shipTo) {
+      conditions.push({
+        OR: [
+          { ship_to_code: { contains: shipTo, mode: 'insensitive' } },
+          {
+            ship_to_location: {
+              OR: [
+                { ship_to_name: { contains: shipTo, mode: 'insensitive' } },
+                { street1: { contains: shipTo, mode: 'insensitive' } },
+                { street2: { contains: shipTo, mode: 'insensitive' } },
+                { city: { contains: shipTo, mode: 'insensitive' } },
+                { state_region: { contains: shipTo, mode: 'insensitive' } },
+                { postal_code: { contains: shipTo, mode: 'insensitive' } },
+                { country_name: { contains: shipTo, mode: 'insensitive' } },
+              ],
+            },
+          },
+        ],
+      });
+    }
+
+    const where: Prisma.DeliveryNoteWhereInput =
+      conditions.length === 1 ? conditions[0]! : { AND: conditions };
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.deliveryNote.count({ where }),
+      this.prisma.deliveryNote.findMany({
+        where,
+        orderBy: buildDeliveryNoteListOrderBy(query.sortBy, query.sortDir),
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          dn_number: true,
+          sold_to_code: true,
+          ship_to_code: true,
+          customer: {
+            select: {
+              sold_to_name: true,
+            },
+          },
+          ship_to_location: {
+            select: {
+              ship_to_name: true,
+              street1: true,
+              street2: true,
+              city: true,
+              state_region: true,
+              postal_code: true,
+              country_name: true,
+            },
+          },
+          current_priority_no: true,
+          is_rushed: true,
+          latest_rush_reason: true,
+          current_status: true,
+          currency_code: true,
+          is_open: true,
+          dn_create_date: true,
+          requested_delivery_date: true,
+          projected_ship_date: true,
+          shipping_type: true,
+          po_date: true,
+          customer_po: true,
+          ship_to_region_state: true,
+        },
+      }),
+    ]);
+
+    const soldToCodes = Array.from(new Set(rows.map((r) => r.sold_to_code)));
+    const customersByCode = new Map<string, { sold_to_name: string }>();
+    if (soldToCodes.length > 0) {
+      const customers = await this.prisma.customer.findMany({
+        where: { sold_to_code: { in: soldToCodes } },
+        select: { sold_to_code: true, sold_to_name: true },
+      });
+      for (const c of customers) {
+        customersByCode.set(normalizeCode(c.sold_to_code), {
+          sold_to_name: c.sold_to_name,
+        });
+      }
+      if (customers.length === 0) {
+        const fallbackCustomers = await this.prisma.customer.findMany({
+          select: { sold_to_code: true, sold_to_name: true },
+        });
+        for (const c of fallbackCustomers) {
+          customersByCode.set(normalizeCode(c.sold_to_code), {
+            sold_to_name: c.sold_to_name,
+          });
+        }
+      }
+    }
+
+    const shipToRows = await this.prisma.shipToLocation.findMany({
+      where: {
+        ship_to_code: {
+          in: Array.from(new Set(rows.map((r) => r.ship_to_code))),
+        },
+        customer: { sold_to_code: { in: soldToCodes } },
+      },
+      select: {
+        ship_to_code: true,
+        ship_to_name: true,
+        street1: true,
+        street2: true,
+        city: true,
+        state_region: true,
+        postal_code: true,
+        country_name: true,
+        customer: { select: { sold_to_code: true } },
+      },
+    });
+    const shipToByCompositeCode = new Map<
+      string,
+      (typeof shipToRows)[number]
+    >();
+    for (const s of shipToRows) {
+      shipToByCompositeCode.set(
+        `${normalizeCode(s.customer.sold_to_code)}::${normalizeCode(s.ship_to_code)}`,
+        s,
+      );
+    }
+    if (shipToRows.length === 0) {
+      const fallbackShipToRows = await this.prisma.shipToLocation.findMany({
+        select: {
+          ship_to_code: true,
+          ship_to_name: true,
+          street1: true,
+          street2: true,
+          city: true,
+          state_region: true,
+          postal_code: true,
+          country_name: true,
+          customer: { select: { sold_to_code: true } },
+        },
+      });
+      for (const s of fallbackShipToRows) {
+        shipToByCompositeCode.set(
+          `${normalizeCode(s.customer.sold_to_code)}::${normalizeCode(s.ship_to_code)}`,
+          s,
+        );
+      }
+    }
+
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const peerCountsById = await this.getShipmentCombinePeerCountsByIds(
+      rows.map((r) => r.id),
+    );
+    const mapped = rows.map((row) => {
+      const joinedShipTo =
+        shipToByCompositeCode.get(
+          `${normalizeCode(row.sold_to_code)}::${normalizeCode(row.ship_to_code)}`,
+        ) ?? row.ship_to_location;
+      const joinedCustomer = customersByCode.get(
+        normalizeCode(row.sold_to_code),
+      );
+      const shipToDisplayName =
+        joinedShipTo?.ship_to_name?.trim() ||
+        row.ship_to_location?.ship_to_name?.trim() ||
+        '';
+      const rawShipToStreet =
+        joinedShipTo?.street1?.trim() ||
+        row.ship_to_location?.street1?.trim() ||
+        null;
+      const shipToStreet =
+        rawShipToStreet &&
+        normalizeCode(rawShipToStreet) !== normalizeCode(row.ship_to_code) &&
+        normalizeCode(rawShipToStreet) !== normalizeCode(shipToDisplayName)
+          ? rawShipToStreet
+          : null;
+      return {
+        ...row,
+        sold_to_name:
+          row.customer?.sold_to_name ??
+          joinedCustomer?.sold_to_name ??
+          row.sold_to_code,
+        /** Human-readable ship-to name (matches Excel "Ship-to Name"). */
+        ship_to_address: shipToDisplayName || row.ship_to_code,
+        ship_to_street: shipToStreet,
+        ship_together_other_count: peerCountsById.get(row.id) ?? 0,
+      };
+    });
+
+    const items = await attachDeliveryNoteStatusContexts(
+      this.prisma,
+      mapped,
+    );
+
+    return {
+      items,
+      page,
+      pageSize,
+      total,
+      totalPages,
+    };
+  }
+
+  /**
+   * How many other delivery notes (globally, ignoring list filters) share the same
+   * customer, ship-to code, ship-to location, and ship type, excluding terminal/hold
+   * statuses — useful as a picker hint only (not enforced when creating shipments).
+   */
+  private async getShipmentCombinePeerCountsByIds(
+    ids: string[],
+  ): Promise<Map<string, number>> {
+    if (ids.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      { id: string; peer_count: number }[]
+    >(
+      Prisma.sql`
+        WITH eligible AS (
+          SELECT
+            dn.id,
+            dn.sold_to_code,
+            dn.ship_to_code,
+            dn.ship_to_location_id,
+            TRIM(COALESCE(dn.shipping_type, '')) AS ship_type_norm
+          FROM delivery_notes dn
+          LEFT JOIN customers cust ON cust.id = dn.customer_id
+            OR (dn.customer_id IS NULL AND cust.sold_to_code = dn.sold_to_code)
+          WHERE dn.current_status::text NOT IN ('SHIPPED', 'ON_HOLD', 'CANCELLED')
+            AND (cust.id IS NULL OR cust.dn_combine_hints_disallowed = false)
+        ),
+        cluster_sizes AS (
+          SELECT
+            sold_to_code,
+            ship_to_code,
+            ship_to_location_id,
+            ship_type_norm,
+            COUNT(*)::int AS cluster_size
+          FROM eligible
+          GROUP BY sold_to_code, ship_to_code, ship_to_location_id, ship_type_norm
+        )
+        SELECT
+          e.id,
+          (cs.cluster_size - 1)::int AS peer_count
+        FROM eligible e
+        INNER JOIN cluster_sizes cs ON
+          cs.sold_to_code = e.sold_to_code
+          AND cs.ship_to_code = e.ship_to_code
+          AND cs.ship_to_location_id IS NOT DISTINCT FROM e.ship_to_location_id
+          AND cs.ship_type_norm = e.ship_type_norm
+        WHERE e.id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
+      `,
+    );
+
+    const map = new Map<string, number>();
+    for (const r of rows) {
+      map.set(r.id, Number(r.peer_count));
+    }
+    return map;
+  }
+
+  /**
+   * Other eligible delivery notes that share the same ship-together grouping keys
+   * as this note (same rules as `ship_together_other_count` on the list).
+   */
+  async listShipTogetherPeers(id: string) {
+    const exists = await this.prisma.deliveryNote.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new NotFoundException();
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      {
+        id: string;
+        dn_number: string;
+        current_status: string;
+        /** Sum of line `open_qty` (remaining units); string from numeric. */
+        total_products: string;
+      }[]
+    >(
+      Prisma.sql`
+        WITH anchor AS (
+          SELECT
+            dn.sold_to_code,
+            dn.ship_to_code,
+            dn.ship_to_location_id,
+            TRIM(COALESCE(dn.shipping_type, '')) AS ship_type_norm,
+            COALESCE(cust.dn_combine_hints_disallowed, false) AS customer_disallows_combine
+          FROM delivery_notes dn
+          LEFT JOIN customers cust ON cust.id = dn.customer_id
+            OR (dn.customer_id IS NULL AND cust.sold_to_code = dn.sold_to_code)
+          WHERE dn.id = ${id}::uuid
+        ),
+        eligible AS (
+          SELECT
+            dn.id,
+            dn.dn_number,
+            dn.current_status,
+            dn.current_priority_no,
+            dn.sold_to_code,
+            dn.ship_to_code,
+            dn.ship_to_location_id,
+            TRIM(COALESCE(dn.shipping_type, '')) AS ship_type_norm
+          FROM delivery_notes dn
+          LEFT JOIN customers cust ON cust.id = dn.customer_id
+            OR (dn.customer_id IS NULL AND cust.sold_to_code = dn.sold_to_code)
+          WHERE dn.current_status::text NOT IN ('SHIPPED', 'ON_HOLD', 'CANCELLED')
+            AND (cust.id IS NULL OR cust.dn_combine_hints_disallowed = false)
+        )
+        SELECT
+          e.id,
+          e.dn_number,
+          e.current_status::text AS current_status,
+          (
+            COALESCE(
+              (
+                SELECT SUM(COALESCE(l.open_qty, 0))
+                FROM delivery_note_lines l
+                WHERE l.delivery_note_id = e.id
+              ),
+              0
+            )
+          )::text AS total_products
+        FROM eligible e
+        INNER JOIN anchor a ON
+          e.sold_to_code = a.sold_to_code
+          AND e.ship_to_code = a.ship_to_code
+          AND e.ship_to_location_id IS NOT DISTINCT FROM a.ship_to_location_id
+          AND e.ship_type_norm = a.ship_type_norm
+        WHERE e.id <> ${id}::uuid
+          AND NOT a.customer_disallows_combine
+        ORDER BY e.current_priority_no ASC NULLS LAST, e.dn_number ASC
+      `,
+    );
+
+    return { items: rows };
+  }
+
+  /**
+   * Other delivery notes in the same pack-combine cluster as the anchor (same
+   * keys as ship-together hints). Includes non-PICKED rows so the UI can explain
+   * why they cannot be added; only rows with `eligible_for_pack_session` may be
+   * sent to POST /pack/start as peers. Sold-to / ship-to codes are trimmed when
+   * matching so minor spacing differences do not hide valid peers.
+   */
+  async listPackingCombinePeers(anchorId: string) {
+    const exists = await this.prisma.deliveryNote.findUnique({
+      where: { id: anchorId },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new NotFoundException();
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      {
+        id: string;
+        dn_number: string;
+        current_status: string;
+        eligible_for_pack_session: boolean;
+      }[]
+    >(
+      Prisma.sql`
+        WITH anchor AS (
+          SELECT
+            TRIM(COALESCE(dn.sold_to_code, '')) AS sold_to_code,
+            TRIM(COALESCE(dn.ship_to_code, '')) AS ship_to_code,
+            dn.ship_to_location_id,
+            TRIM(COALESCE(dn.shipping_type, '')) AS ship_type_norm,
+            COALESCE(cust.dn_combine_hints_disallowed, false) AS customer_disallows_combine
+          FROM delivery_notes dn
+          LEFT JOIN customers cust ON cust.id = dn.customer_id
+            OR (dn.customer_id IS NULL AND cust.sold_to_code = dn.sold_to_code)
+          WHERE dn.id = ${anchorId}::uuid
+        ),
+        cluster AS (
+          SELECT
+            dn.id,
+            dn.dn_number,
+            dn.current_status::text AS current_status,
+            TRIM(COALESCE(dn.sold_to_code, '')) AS sold_to_code,
+            TRIM(COALESCE(dn.ship_to_code, '')) AS ship_to_code,
+            dn.ship_to_location_id,
+            TRIM(COALESCE(dn.shipping_type, '')) AS ship_type_norm
+          FROM delivery_notes dn
+          LEFT JOIN customers cust ON cust.id = dn.customer_id
+            OR (dn.customer_id IS NULL AND cust.sold_to_code = dn.sold_to_code)
+          WHERE dn.current_status::text NOT IN ('SHIPPED', 'ON_HOLD', 'CANCELLED')
+            AND (cust.id IS NULL OR cust.dn_combine_hints_disallowed = false)
+        )
+        SELECT
+          c.id,
+          c.dn_number,
+          c.current_status,
+          (c.current_status = 'PICKED') AS eligible_for_pack_session
+        FROM cluster c
+        INNER JOIN anchor a ON
+          c.sold_to_code = a.sold_to_code
+          AND c.ship_to_code = a.ship_to_code
+          AND c.ship_to_location_id IS NOT DISTINCT FROM a.ship_to_location_id
+          AND c.ship_type_norm = a.ship_type_norm
+        WHERE c.id <> ${anchorId}::uuid
+          AND NOT a.customer_disallows_combine
+        ORDER BY
+          CASE WHEN c.current_status = 'PICKED' THEN 0 ELSE 1 END,
+          c.dn_number ASC
+        LIMIT 100
+      `,
+    );
+
+    return { items: rows };
+  }
+
+  /** When pack migrations are not applied yet, avoid crashing detail load. */
+  private isPackSchemaMissingError(e: unknown): boolean {
+    if (e instanceof PrismaClientKnownRequestError) {
+      if (e.code === 'P2021') return true;
+      if (e.code === 'P2010' && /pack_/i.test(String(e.message))) return true;
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    return (
+      /pack_session|pack_boxes|pack_sessions/i.test(msg) &&
+      /does not exist|relation .* does not exist/i.test(msg)
+    );
+  }
+
+  private async loadPackExtrasForDetail(id: string) {
+    try {
+      return await Promise.all([
+        this.listPackingCombinePeers(id),
+        this.getActivePackSessionDetail(id),
+        this.listCompletedPackSessionsForDetail(id, 5),
+      ]);
+    } catch (e) {
+      if (this.isPackSchemaMissingError(e)) {
+        this.logger.warn(
+          'Pack tables missing; apply migration 20260512060000_pack_sessions_and_boxes. Packing fields omitted from this response.',
+        );
+        return [{ items: [] }, null, []] as const;
+      }
+      throw e;
+    }
+  }
+
+  private async getActivePackSessionDetail(anchorId: string) {
+    const link = await this.prisma.packSessionDeliveryNote.findFirst({
+      where: {
+        delivery_note_id: anchorId,
+        pack_session: { completed_at: null },
+      },
+      include: {
+        pack_session: {
+          include: {
+            delivery_notes: {
+              include: {
+                delivery_note: {
+                  select: { id: true, dn_number: true, current_status: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!link) return null;
+    const s = link.pack_session;
+    return {
+      id: s.id,
+      created_at: s.created_at.toISOString(),
+      delivery_notes: s.delivery_notes.map((m) => ({
+        id: m.delivery_note.id,
+        dn_number: m.delivery_note.dn_number,
+        current_status: m.delivery_note.current_status,
+      })),
+    };
+  }
+
+  private async listCompletedPackSessionsForDetail(
+    deliveryNoteId: string,
+    take: number,
+  ) {
+    const sessions = await this.prisma.packSession.findMany({
+      where: {
+        completed_at: { not: null },
+        delivery_notes: { some: { delivery_note_id: deliveryNoteId } },
+      },
+      orderBy: { completed_at: 'desc' },
+      take,
+      include: {
+        creator: {
+          select: { id: true, email: true, display_name: true },
+        },
+        boxes: { orderBy: { sort_order: 'asc' } },
+        delivery_notes: {
+          include: {
+            delivery_note: {
+              select: { id: true, dn_number: true, current_status: true },
+            },
+          },
+        },
+      },
+    });
+    return sessions.map((s) => ({
+      id: s.id,
+      completed_at: s.completed_at?.toISOString() ?? null,
+      pack_completion_note: s.pack_completion_note?.trim() || null,
+      packed_by: this.serializeWorkflowActor(s.creator),
+      delivery_notes: s.delivery_notes.map((m) => ({
+        id: m.delivery_note.id,
+        dn_number: m.delivery_note.dn_number,
+        current_status: m.delivery_note.current_status,
+      })),
+      boxes: s.boxes.map((b) => ({
+        id: b.id,
+        sort_order: b.sort_order,
+        box_number: b.box_number,
+        weight_lb: b.weight_lb.toString(),
+        length_in: b.length_in.toString(),
+        width_in: b.width_in.toString(),
+        height_in: b.height_in.toString(),
+      })),
+    }));
+  }
+
+  private assertPackClusterDns(
+    anchorId: string,
+    dns: Array<{
+      id: string;
+      dn_number: string;
+      sold_to_code: string;
+      ship_to_code: string;
+      ship_to_location_id: string | null;
+      shipping_type: string | null;
+      current_status: dn_status;
+      customer: { dn_combine_hints_disallowed: boolean } | null;
+    }>,
+  ) {
+    const normType = (s: string | null | undefined) => (s ?? '').trim();
+    const normCode = (s: string | null | undefined) => (s ?? '').trim();
+    const key = (d: (typeof dns)[number]) =>
+      `${normCode(d.sold_to_code)}|${normCode(d.ship_to_code)}|${d.ship_to_location_id ?? 'NULL'}|${normType(d.shipping_type)}`;
+    const anchor = dns.find((d) => d.id === anchorId);
+    if (!anchor) {
+      throw new BadRequestException('Anchor delivery note missing from set');
+    }
+    const k0 = key(anchor);
+    for (const d of dns) {
+      if (d.current_status !== dn_status.PICKED) {
+        throw new BadRequestException(
+          `All delivery notes must be PICKED before packing (${d.dn_number}).`,
+        );
+      }
+      if (key(d) !== k0) {
+        throw new BadRequestException(
+          'All delivery notes must share the same customer, ship-to, location, and ship type.',
+        );
+      }
+      if (d.customer?.dn_combine_hints_disallowed === true) {
+        throw new BadRequestException(
+          `Customer rules disallow combining for sold-to ${d.sold_to_code}.`,
+        );
+      }
+    }
+  }
+
+  private async assertNoOpenPackSessionForDns(
+    tx: Prisma.TransactionClient,
+    dnIds: string[],
+  ) {
+    const hit = await tx.packSession.findFirst({
+      where: {
+        completed_at: null,
+        delivery_notes: { some: { delivery_note_id: { in: dnIds } } },
+      },
+      select: { id: true },
+    });
+    if (hit) {
+      throw new BadRequestException(
+        'One or more delivery notes are already in an open pack session. Complete packing first.',
+      );
+    }
+  }
+
+  async startPacking(anchorId: string, dto: StartPackDto, payload: JwtPayload) {
+    const peerIds = [...new Set(dto.peerDeliveryNoteIds ?? [])].filter(
+      (x) => x && x !== anchorId,
+    );
+    const allIds = [anchorId, ...peerIds];
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.assertNoOpenPackSessionForDns(tx, allIds);
+
+      const dns = await tx.deliveryNote.findMany({
+        where: { id: { in: allIds } },
+        include: {
+          customer: { select: { dn_combine_hints_disallowed: true } },
+        },
+      });
+      if (dns.length !== allIds.length) {
+        throw new BadRequestException(
+          'One or more delivery notes were not found',
+        );
+      }
+      this.assertPackClusterDns(anchorId, dns);
+
+      const sessionId = randomUUID();
+      await tx.packSession.create({
+        data: {
+          id: sessionId,
+          created_by_user_id: payload.sub,
+        },
+      });
+      await tx.packSessionDeliveryNote.createMany({
+        data: allIds.map((delivery_note_id) => ({
+          pack_session_id: sessionId,
+          delivery_note_id,
+        })),
+      });
+
+      const msg = `packSession:${sessionId}`;
+      for (const dnId of allIds) {
+        await this.applyTransition(tx, dnId, dn_status.PACKING, payload, msg, {
+          allowPackTransitions: true,
+        });
+      }
+    });
+
+    return this.findOne(anchorId, payload);
+  }
+
+  async completePacking(
+    anchorId: string,
+    dto: CompletePackDto,
+    payload: JwtPayload,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      const membership = await tx.packSessionDeliveryNote.findFirst({
+        where: {
+          delivery_note_id: anchorId,
+          pack_session: { completed_at: null },
+        },
+        include: {
+          pack_session: {
+            include: {
+              delivery_notes: {
+                select: { delivery_note_id: true },
+              },
+            },
+          },
+        },
+      });
+      if (!membership) {
+        throw new BadRequestException(
+          'No open pack session for this delivery note. Start packing first.',
+        );
+      }
+      const session = membership.pack_session;
+      const memberIds = session.delivery_notes.map((d) => d.delivery_note_id);
+
+      const members = await tx.deliveryNote.findMany({
+        where: { id: { in: memberIds } },
+      });
+      for (const m of members) {
+        if (m.current_status !== dn_status.PACKING) {
+          throw new BadRequestException(
+            `All delivery notes in the pack session must be in PACKING (check ${m.dn_number}).`,
+          );
+        }
+      }
+
+      const boxRows = dto.boxes.map((b, idx) => ({
+        id: randomUUID(),
+        pack_session_id: session.id,
+        sort_order: idx,
+        box_number: b.boxNumber?.trim() || null,
+        weight_lb: new Prisma.Decimal(b.weightLb),
+        length_in: new Prisma.Decimal(b.lengthIn),
+        width_in: new Prisma.Decimal(b.widthIn),
+        height_in: new Prisma.Decimal(b.heightIn),
+      }));
+      await tx.packBox.createMany({ data: boxRows });
+
+      const trimmedNote = dto.packCompletionNote?.trim();
+      await tx.packSession.update({
+        where: { id: session.id },
+        data: {
+          completed_at: new Date(),
+          pack_completion_note: trimmedNote || null,
+        },
+      });
+
+      const msg = `packSession:${session.id};boxes:${dto.boxes.length}${
+        trimmedNote ? `;note:${trimmedNote.slice(0, 200)}` : ''
+      }`;
+      for (const dnId of memberIds) {
+        await this.applyTransition(tx, dnId, dn_status.PACKED, payload, msg, {
+          allowPackTransitions: true,
+        });
+      }
+    });
+
+    return this.findOne(anchorId, payload);
+  }
+
+  /** Replace boxes and pack note on the latest completed session while all members stay PACKED. */
+  async updateCompletedPacking(
+    anchorId: string,
+    dto: CompletePackDto,
+    payload: JwtPayload,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      const session = await this.findLatestCompletedPackSessionForNote(
+        tx,
+        anchorId,
+      );
+      if (!session) {
+        throw new BadRequestException(
+          'No completed pack session found for this delivery note',
+        );
+      }
+      await this.assertDnsStatuses(tx, session.memberIds, dn_status.PACKED);
+
+      await tx.packBox.deleteMany({ where: { pack_session_id: session.id } });
+
+      const boxRows = dto.boxes.map((b, idx) => ({
+        id: randomUUID(),
+        pack_session_id: session.id,
+        sort_order: idx,
+        box_number: b.boxNumber?.trim() || null,
+        weight_lb: new Prisma.Decimal(b.weightLb),
+        length_in: new Prisma.Decimal(b.lengthIn),
+        width_in: new Prisma.Decimal(b.widthIn),
+        height_in: new Prisma.Decimal(b.heightIn),
+      }));
+      await tx.packBox.createMany({ data: boxRows });
+
+      const trimmedNote = dto.packCompletionNote?.trim();
+      await tx.packSession.update({
+        where: { id: session.id },
+        data: { pack_completion_note: trimmedNote || null },
+      });
+    });
+
+    return this.findOne(anchorId, payload);
+  }
+
+  private async assertPrintRole(payload: JwtPayload) {
+    const role = await this.getActiveRole(payload);
+    if (!['PACKER', 'SHIPPER', 'SUPERVISOR', 'SYSTEM'].includes(role.code)) {
+      throw new ForbiddenException(
+        'Print actions require active role PACKER, SHIPPER, SUPERVISOR, or SYSTEM.',
+      );
+    }
+    const ok = await this.permissions.roleHasPermission(
+      payload.activeRoleId,
+      'dn.read',
+    );
+    if (!ok) {
+      throw new ForbiddenException('Missing permission dn.read');
+    }
+  }
+
+  async buildShippingLabelPdf(
+    id: string,
+    payload: JwtPayload,
+  ): Promise<Buffer> {
+    await this.assertPrintRole(payload);
+    const dn = await this.prisma.deliveryNote.findUnique({
+      where: { id },
+      include: {
+        customer: { select: { sold_to_name: true } },
+        ship_to_location: {
+          select: {
+            ship_to_name: true,
+            street1: true,
+            street2: true,
+            city: true,
+            state_region: true,
+            postal_code: true,
+            country_name: true,
+          },
+        },
+      },
+    });
+    if (!dn) throw new NotFoundException('Delivery note not found');
+
+    const company =
+      dn.customer?.sold_to_name?.trim() || dn.sold_to_code || 'Customer';
+    const st = dn.ship_to_location;
+    const shipToName = st?.ship_to_name?.trim() || dn.ship_to_code;
+    const addrLines: string[] = [];
+    if (st?.street1?.trim()) addrLines.push(st.street1.trim());
+    if (st?.street2?.trim()) addrLines.push(st.street2.trim());
+    const cityLine = [st?.city, st?.state_region, st?.postal_code]
+      .filter((x) => x?.trim())
+      .join(', ');
+    if (cityLine) addrLines.push(cityLine);
+    if (st?.country_name?.trim()) addrLines.push(st.country_name.trim());
+
+    return this.renderPdfDocument(288, 432, 28, (doc) => {
+      doc.fontSize(9).fillColor('#111827');
+      doc.text(`DN ${dn.dn_number}`);
+      doc.moveDown(0.35);
+      doc.fontSize(11).font('Helvetica-Bold').text(company);
+      doc.font('Helvetica').fontSize(10);
+      doc.moveDown(0.25);
+      doc.text(`Ship-to: ${shipToName}`);
+      doc.moveDown(0.35);
+      for (const line of addrLines) {
+        doc.text(line);
+      }
+    });
+  }
+
+  async buildPoLabelPdf(id: string, payload: JwtPayload): Promise<Buffer> {
+    await this.assertPrintRole(payload);
+    const dn = await this.prisma.deliveryNote.findUnique({
+      where: { id },
+      select: { customer_po: true, dn_number: true },
+    });
+    if (!dn) throw new NotFoundException('Delivery note not found');
+    const po = dn.customer_po?.trim();
+    if (!po) {
+      throw new BadRequestException(
+        'This delivery note has no customer PO to print.',
+      );
+    }
+
+    return this.renderPdfDocument(288, 144, 20, (doc) => {
+      doc.fontSize(8).fillColor('#6b7280').text(`DN ${dn.dn_number}`, {
+        align: 'center',
+      });
+      doc.moveDown(0.5);
+      doc.fontSize(22).font('Helvetica-Bold').fillColor('#111827').text(po, {
+        align: 'center',
+      });
+    });
+  }
+
+  private renderPdfDocument(
+    widthPt: number,
+    heightPt: number,
+    marginPt: number,
+    draw: (doc: InstanceType<typeof PDFKit>) => void,
+  ): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      const doc = new PDFKit({
+        size: [widthPt, heightPt],
+        margin: marginPt,
+        autoFirstPage: true,
+      });
+      doc.on('data', (c) => chunks.push(c as Buffer));
+      doc.on('error', reject);
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      try {
+        draw(doc);
+      } catch (e) {
+        reject(e);
+        return;
+      }
+      doc.end();
+    });
+  }
+
+  /** Daily counts for the current Vancouver calendar day. */
+  async getDailyStats(_payload: JwtPayload) {
+    const { localDate, startUtc, endUtc } = getVancouverDayBoundsUtc();
+    const changedToday = { gte: startUtc, lt: endUtc };
+
+    const openWhere = { is_open: true };
+
+    const [dueToday, pickedTotal, packedTotal, shippedGroups] =
+      await Promise.all([
+        this.prisma.deliveryNote.count({
+          where: {
+            ...openWhere,
+            current_status: {
+              notIn: [
+                dn_status.SHIPPED,
+                dn_status.CANCELLED,
+                dn_status.ON_HOLD,
+              ],
+            },
+          },
+        }),
+        this.prisma.deliveryNote.count({
+          where: { ...openWhere, current_status: dn_status.PICKED },
+        }),
+        this.prisma.deliveryNote.count({
+          where: { ...openWhere, current_status: dn_status.PACKED },
+        }),
+        this.prisma.dnStatusHistory.groupBy({
+          by: ['delivery_note_id'],
+          where: { to_status: dn_status.SHIPPED, changed_at: changedToday },
+        }),
+      ]);
+
+    return {
+      date: localDate,
+      timezone: DELIVERY_NOTE_STATS_TIMEZONE,
+      due_today: dueToday,
+      picked_total: pickedTotal,
+      packed_total: packedTotal,
+      shipped_today: shippedGroups.length,
+    };
+  }
+
+  /**
+   * Picker quick search: match `dn_number` ending with the given digits.
+   * Excludes terminal/hold statuses so suggestions stay actionable.
+   */
+  async suggestByDnSuffix(digits: string) {
+    const suffix = digits.replace(/\D/g, '');
+    const excluded: dn_status[] = [
+      dn_status.SHIPPED,
+      dn_status.CANCELLED,
+      dn_status.ON_HOLD,
+    ];
+
+    const rows = await this.prisma.deliveryNote.findMany({
+      where: {
+        current_status: { notIn: excluded },
+        dn_number: { endsWith: suffix, mode: 'insensitive' },
+      },
+      orderBy: [{ current_priority_no: 'asc' }, { dn_number: 'asc' }],
+      take: 25,
+      select: {
+        id: true,
+        dn_number: true,
+        current_status: true,
+        current_priority_no: true,
+        is_rushed: true,
+        sold_to_code: true,
+        customer: { select: { sold_to_name: true } },
+      },
+    });
+
+    const items = rows.map((r) => ({
+      id: r.id,
+      dn_number: r.dn_number,
+      current_status: r.current_status,
+      current_priority_no: r.current_priority_no,
+      is_rushed: r.is_rushed,
+      sold_to_name: r.customer?.sold_to_name?.trim() || r.sold_to_code,
+    }));
+
+    return { items };
+  }
+
+  async findOne(id: string, payload: JwtPayload) {
+    const dn = await this.prisma.deliveryNote.findUnique({
+      where: { id },
+      include: {
+        customer: {
+          select: {
+            sold_to_name: true,
+            default_email: true,
+            fed_id_number: true,
+            customer_carrier_accounts: {
+              where: { is_active: true },
+              select: { carrier_code: true, account_number: true },
+              orderBy: [{ carrier_code: 'asc' }, { account_number: 'asc' }],
+            },
+          },
+        },
+        ship_to_location: {
+          select: {
+            ship_to_name: true,
+            street1: true,
+            street2: true,
+            city: true,
+            state_region: true,
+            postal_code: true,
+            country_code: true,
+            country_name: true,
+          },
+        },
+        picking_started_by: {
+          select: { id: true, email: true, display_name: true },
+        },
+        lines: {
+          orderBy: { doc_item: 'asc' },
+        },
+        status_history: {
+          orderBy: { changed_at: 'desc' },
+          take: 40,
+          include: {
+            actor_user: {
+              select: { id: true, email: true, display_name: true },
+            },
+            actor_role: { select: { code: true, name: true } },
+          },
+        },
+        priority_history: {
+          orderBy: { changed_at: 'desc' },
+          take: 20,
+          include: {
+            actor_user: {
+              select: { id: true, email: true, display_name: true },
+            },
+            actor_role: { select: { code: true, name: true } },
+          },
+        },
+      },
+    });
+    if (!dn) {
+      throw new NotFoundException('Delivery note not found');
+    }
+
+    const role = await this.getActiveRole(payload);
+    const allowedNextStatuses = (
+      await this.computeAllowedNextStatuses(
+        payload,
+        role.code,
+        dn.current_status,
+        dn.picking_started_by_user_id,
+      )
+    ).filter(
+      (ns) =>
+        !(
+          (dn.current_status === dn_status.PICKED &&
+            ns === dn_status.PACKING) ||
+          (dn.current_status === dn_status.PACKING && ns === dn_status.PACKED)
+        ),
+    );
+    const canSetPriority =
+      role.code === 'SUPERVISOR' &&
+      (await this.permissions.roleHasPermission(
+        payload.activeRoleId,
+        'dn.priority.set',
+      ));
+    const hasRushPermission =
+      (role.code === 'SUPERVISOR' || role.code === 'SYSTEM') &&
+      (await this.permissions.roleHasPermission(
+        payload.activeRoleId,
+        'dn.rush.set',
+      ));
+    const canMarkRush =
+      hasRushPermission &&
+      deliveryNoteEligibleForRush(dn.current_status, dn.is_open);
+    const canClearRush = hasRushPermission && dn.is_rushed;
+
+    const [packingCombinePeers, activePackSession, completedPackSessions] =
+      await this.loadPackExtrasForDetail(id);
+
+    const serialized = this.serializeDeliveryNote(dn);
+    const carrierAccounts =
+      dn.customer?.customer_carrier_accounts?.map((a) => ({
+        carrier_code: a.carrier_code,
+        account_number: a.account_number,
+      })) ?? [];
+    const matched_carrier_accounts = filterCarrierAccountsForShippingType(
+      carrierAccounts,
+      dn.shipping_type,
+    );
+
+    const latestShipmentRow = await this.prisma.shipment.findFirst({
+      where: { delivery_note_id: id },
+      orderBy: { created_at: 'desc' },
+      select: {
+        tracking_number: true,
+        ship_date: true,
+        carrier_code: true,
+        shipper: {
+          select: { id: true, email: true, display_name: true },
+        },
+      },
+    });
+
+    const latestPackSession = completedPackSessions[0] ?? null;
+    const workflowHandoff = this.buildWorkflowHandoff({
+      statusHistory: dn.status_history as WorkflowStatusHistoryRow[],
+      pickingStartedBy: dn.picking_started_by,
+      packCreator: latestPackSession?.packed_by ?? null,
+      shipper: latestShipmentRow?.shipper ?? null,
+    });
+
+    return {
+      ...serialized,
+      customer_email: dn.customer?.default_email?.trim() || null,
+      fed_id_number: dn.customer?.fed_id_number?.trim() || null,
+      matched_carrier_accounts,
+      allowedNextStatuses,
+      canSetPriority,
+      canMarkRush,
+      canClearRush,
+      packing_combine_peers: packingCombinePeers,
+      active_pack_session: activePackSession,
+      completed_pack_sessions: completedPackSessions,
+      latest_shipment: latestShipmentRow
+        ? {
+            tracking_number: latestShipmentRow.tracking_number?.trim() || null,
+            ship_date: latestShipmentRow.ship_date.toISOString().slice(0, 10),
+            carrier_code: latestShipmentRow.carrier_code,
+            shipped_by: latestShipmentRow.shipper
+              ? this.serializeWorkflowActor(latestShipmentRow.shipper)
+              : null,
+          }
+        : null,
+      workflow_handoff: workflowHandoff,
+    };
+  }
+
+  async transition(
+    id: string,
+    toStatus: dn_status,
+    payload: JwtPayload,
+    message?: string,
+    trackingNumber?: string,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      await this.applyShipGroupTransition(
+        tx,
+        id,
+        toStatus,
+        payload,
+        message,
+        trackingNumber,
+      );
+    });
+
+    return this.findOne(id, payload);
+  }
+
+  /**
+   * Shipper transitions that move every DN in the latest completed pack session
+   * together (same physical shipment). Marking shipped also records one tracking
+   * number on each member's shipment row.
+   */
+  private async applyShipGroupTransition(
+    tx: Prisma.TransactionClient,
+    anchorId: string,
+    toStatus: dn_status,
+    payload: JwtPayload,
+    message?: string,
+    trackingNumber?: string,
+  ): Promise<void> {
+    const anchor = await tx.deliveryNote.findUnique({ where: { id: anchorId } });
+    if (!anchor) {
+      throw new NotFoundException('Delivery note not found');
+    }
+
+    const from = anchor.current_status;
+    const isStartShipping =
+      from === dn_status.PACKED && toStatus === dn_status.SHIPPING_IN_PROGRESS;
+    const isMarkShipped =
+      from === dn_status.SHIPPING_IN_PROGRESS && toStatus === dn_status.SHIPPED;
+    const isReturnToPacked =
+      from === dn_status.SHIPPING_IN_PROGRESS && toStatus === dn_status.PACKED;
+
+    if (!isStartShipping && !isMarkShipped && !isReturnToPacked) {
+      await this.applyTransition(tx, anchorId, toStatus, payload, message);
+      return;
+    }
+
+    const packSession = await this.findLatestCompletedPackSessionForNote(
+      tx,
+      anchorId,
+    );
+    const memberIds =
+      packSession && packSession.memberIds.length > 0
+        ? packSession.memberIds
+        : [anchorId];
+
+    if (isMarkShipped) {
+      const tracking = trackingNumber?.trim();
+      if (!tracking) {
+        throw new BadRequestException(
+          'Tracking number is required to mark shipped.',
+        );
+      }
+      if (tracking.length > 80) {
+        throw new BadRequestException(
+          'Tracking number is too long (max 80 characters).',
+        );
+      }
+    }
+
+    const members = await tx.deliveryNote.findMany({
+      where: { id: { in: memberIds } },
+      include: {
+        customer: {
+          select: {
+            customer_carrier_accounts: {
+              where: { is_active: true },
+              select: { carrier_code: true, account_number: true },
+            },
+          },
+        },
+      },
+    });
+    if (members.length !== memberIds.length) {
+      throw new BadRequestException(
+        'One or more delivery notes in the pack session were not found',
+      );
+    }
+
+    const requiredStatus = isStartShipping
+      ? dn_status.PACKED
+      : dn_status.SHIPPING_IN_PROGRESS;
+
+    for (const m of members) {
+      if (m.current_status !== requiredStatus) {
+        throw new BadRequestException(
+          `All delivery notes in this shipment must be ${requiredStatus} (${m.dn_number} is ${m.current_status}).`,
+        );
+      }
+    }
+
+    const shipMsg =
+      message?.trim() ||
+      (packSession
+        ? `packSession:${packSession.id};ship:${toStatus}`
+        : undefined);
+
+    for (const m of members) {
+      await this.applyTransition(tx, m.id, toStatus, payload, shipMsg);
+    }
+
+    if (!isMarkShipped) return;
+
+    const tracking = trackingNumber!.trim();
+    for (const m of members) {
+      const existing = await tx.shipment.findFirst({
+        where: { delivery_note_id: m.id },
+      });
+      if (existing) {
+        throw new BadRequestException(
+          `Shipment already recorded for ${m.dn_number}.`,
+        );
+      }
+
+      const accounts = filterCarrierAccountsForShippingType(
+        m.customer?.customer_carrier_accounts ?? [],
+        m.shipping_type,
+      );
+      const collectAccount = accounts[0]?.account_number?.trim() || null;
+
+      await tx.shipment.create({
+        data: {
+          id: randomUUID(),
+          delivery_note_id: m.id,
+          carrier_code: inferCarrierCodeFromShippingType(m.shipping_type),
+          payment_method: collectAccount ? 'COLLECT' : 'SENDER',
+          collect_account_number: collectAccount,
+          tracking_number: tracking,
+          ship_date: new Date(),
+          shipper_user_id: payload.sub,
+          service_level: m.shipping_type?.trim() || null,
+        },
+      });
+    }
+  }
+
+  async bulkTransition(
+    ids: string[],
+    toStatus: dn_status,
+    payload: JwtPayload,
+    message?: string,
+  ) {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) {
+      throw new BadRequestException(
+        'At least one delivery note id is required',
+      );
+    }
+    if (unique.length > 100) {
+      throw new BadRequestException(
+        'Too many delivery notes per request (max 100)',
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const id of unique) {
+        await this.applyTransition(tx, id, toStatus, payload, message);
+      }
+    });
+
+    return { processed: unique.length };
+  }
+
+  private async findLatestCompletedPackSessionForNote(
+    tx: Prisma.TransactionClient,
+    deliveryNoteId: string,
+  ): Promise<{
+    id: string;
+    memberIds: string[];
+    completed_at: Date;
+  } | null> {
+    const rows = await tx.packSession.findMany({
+      where: {
+        completed_at: { not: null },
+        delivery_notes: { some: { delivery_note_id: deliveryNoteId } },
+      },
+      orderBy: { completed_at: 'desc' },
+      take: 1,
+      select: {
+        id: true,
+        completed_at: true,
+        delivery_notes: { select: { delivery_note_id: true } },
+      },
+    });
+    const s = rows[0];
+    if (!s?.completed_at) return null;
+    return {
+      id: s.id,
+      memberIds: s.delivery_notes.map((m) => m.delivery_note_id),
+      completed_at: s.completed_at,
+    };
+  }
+
+  private async findOpenPackSessionForNote(
+    tx: Prisma.TransactionClient,
+    deliveryNoteId: string,
+  ): Promise<{ id: string; memberIds: string[] } | null> {
+    const link = await tx.packSessionDeliveryNote.findFirst({
+      where: {
+        delivery_note_id: deliveryNoteId,
+        pack_session: { completed_at: null },
+      },
+      select: {
+        pack_session: {
+          select: {
+            id: true,
+            delivery_notes: { select: { delivery_note_id: true } },
+          },
+        },
+      },
+    });
+    if (!link) return null;
+    return {
+      id: link.pack_session.id,
+      memberIds: link.pack_session.delivery_notes.map(
+        (m) => m.delivery_note_id,
+      ),
+    };
+  }
+
+  private async assertDnsStatuses(
+    tx: Prisma.TransactionClient,
+    ids: string[],
+    expected: dn_status,
+  ): Promise<void> {
+    const dns = await tx.deliveryNote.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, dn_number: true, current_status: true },
+    });
+    const byId = new Map(dns.map((d) => [d.id, d]));
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (!row) {
+        throw new NotFoundException('Delivery note not found');
+      }
+      if (row.current_status !== expected) {
+        throw new BadRequestException(
+          `Pack session member ${row.dn_number} is ${row.current_status}; expected ${expected} for this operation`,
+        );
+      }
+    }
+  }
+
+  private async revertCompletedPackSessionToPacking(
+    tx: Prisma.TransactionClient,
+    anchorDeliveryNoteId: string,
+    payload: JwtPayload,
+    message?: string,
+  ): Promise<void> {
+    const session = await this.findLatestCompletedPackSessionForNote(
+      tx,
+      anchorDeliveryNoteId,
+    );
+    if (!session) {
+      throw new BadRequestException(
+        'No completed pack session found for this delivery note',
+      );
+    }
+    await this.assertDnsStatuses(tx, session.memberIds, dn_status.PACKED);
+    await tx.packBox.deleteMany({ where: { pack_session_id: session.id } });
+    await tx.packSession.update({
+      where: { id: session.id },
+      data: { completed_at: null },
+    });
+    for (const memberId of session.memberIds) {
+      await this.persistDnStatusChange(
+        tx,
+        memberId,
+        dn_status.PACKED,
+        dn_status.PACKING,
+        payload,
+        message,
+      );
+    }
+  }
+
+  private async revertCompletedPackSessionToPicked(
+    tx: Prisma.TransactionClient,
+    anchorDeliveryNoteId: string,
+    payload: JwtPayload,
+    message?: string,
+  ): Promise<void> {
+    const session = await this.findLatestCompletedPackSessionForNote(
+      tx,
+      anchorDeliveryNoteId,
+    );
+    if (!session) {
+      throw new BadRequestException(
+        'No completed pack session found for this delivery note',
+      );
+    }
+    await this.assertDnsStatuses(tx, session.memberIds, dn_status.PACKED);
+    await tx.packSession.delete({ where: { id: session.id } });
+    for (const memberId of session.memberIds) {
+      await this.persistDnStatusChange(
+        tx,
+        memberId,
+        dn_status.PACKED,
+        dn_status.PICKED,
+        payload,
+        message,
+      );
+    }
+  }
+
+  private async revertOpenPackSessionToPicked(
+    tx: Prisma.TransactionClient,
+    anchorDeliveryNoteId: string,
+    payload: JwtPayload,
+    message?: string,
+  ): Promise<void> {
+    const session = await this.findOpenPackSessionForNote(
+      tx,
+      anchorDeliveryNoteId,
+    );
+    if (!session) {
+      throw new BadRequestException(
+        'No open pack session found for this delivery note',
+      );
+    }
+    await this.assertDnsStatuses(tx, session.memberIds, dn_status.PACKING);
+    await tx.packSession.delete({ where: { id: session.id } });
+    for (const memberId of session.memberIds) {
+      await this.persistDnStatusChange(
+        tx,
+        memberId,
+        dn_status.PACKING,
+        dn_status.PICKED,
+        payload,
+        message,
+      );
+    }
+  }
+
+  private async persistDnStatusChange(
+    tx: Prisma.TransactionClient,
+    dnId: string,
+    fromStatus: dn_status,
+    toStatus: dn_status,
+    payload: JwtPayload,
+    message?: string,
+  ): Promise<void> {
+    const dn = await tx.deliveryNote.findUnique({ where: { id: dnId } });
+    if (!dn) {
+      throw new NotFoundException('Delivery note not found');
+    }
+    if (dn.current_status !== fromStatus) {
+      throw new BadRequestException(
+        `Cannot transition delivery note: expected status ${fromStatus}, found ${dn.current_status}`,
+      );
+    }
+    const isOpen =
+      toStatus === dn_status.SHIPPED || toStatus === dn_status.CANCELLED
+        ? false
+        : toStatus === dn_status.PRIORITIZED &&
+            fromStatus === dn_status.CANCELLED
+          ? true
+          : dn.is_open;
+    const pickingUpdate = this.pickingClaimUpdate(
+      fromStatus,
+      toStatus,
+      payload.sub,
+    );
+    await tx.deliveryNote.update({
+      where: { id: dnId },
+      data: {
+        current_status: toStatus,
+        is_open: isOpen,
+        ...pickingUpdate,
+      },
+    });
+    await tx.dnStatusHistory.create({
+      data: {
+        delivery_note_id: dnId,
+        from_status: fromStatus,
+        to_status: toStatus,
+        message: message?.trim() || null,
+        actor_user_id: payload.sub,
+        actor_role_id: payload.activeRoleId,
+        source: 'MANUAL',
+      },
+    });
+  }
+
+  private async applyTransition(
+    tx: Prisma.TransactionClient,
+    id: string,
+    toStatus: dn_status,
+    payload: JwtPayload,
+    message?: string,
+    opts?: { allowPackTransitions?: boolean },
+  ): Promise<void> {
+    const dn = await tx.deliveryNote.findUnique({
+      where: { id },
+    });
+    if (!dn) {
+      throw new NotFoundException('Delivery note not found');
+    }
+
+    const from = dn.current_status;
+    if (from === toStatus) {
+      return;
+    }
+
+    const meta = getTransitionMeta(from, toStatus);
+    if (!meta) {
+      throw new BadRequestException(
+        `Invalid status transition: ${from} → ${toStatus}`,
+      );
+    }
+
+    if (
+      !opts?.allowPackTransitions &&
+      ((from === dn_status.PICKED && toStatus === dn_status.PACKING) ||
+        (from === dn_status.PACKING && toStatus === dn_status.PACKED))
+    ) {
+      throw new BadRequestException(
+        'Use POST /delivery-notes/:id/pack/start to begin packing, or POST /delivery-notes/:id/pack/complete with box dimensions to mark packed.',
+      );
+    }
+
+    const role = await this.getActiveRole(payload);
+    if (!meta.allowedRoles.includes(role.code)) {
+      throw new ForbiddenException(
+        `Role ${role.code} cannot perform this transition`,
+      );
+    }
+    const hasPerm = await this.permissions.roleHasPermission(
+      payload.activeRoleId,
+      meta.permission,
+    );
+    if (!hasPerm) {
+      throw new ForbiddenException(`Missing permission: ${meta.permission}`);
+    }
+
+    if (from === dn_status.PICKING && toStatus === dn_status.PICKED) {
+      const claim = dn.picking_started_by_user_id;
+      if (claim !== null && claim !== payload.sub) {
+        throw new ForbiddenException(
+          'Only the picker who started this pick can mark it picked',
+        );
+      }
+    }
+
+    if (from === dn_status.PACKED && toStatus === dn_status.PACKING) {
+      const blocked = this.packerRevertBlockedByShipping(from, toStatus);
+      if (blocked) throw new BadRequestException(blocked);
+      await this.revertCompletedPackSessionToPacking(tx, id, payload, message);
+      return;
+    }
+
+    if (from === dn_status.PACKED && toStatus === dn_status.PICKED) {
+      const blocked = this.packerRevertBlockedByShipping(from, toStatus);
+      if (blocked) throw new BadRequestException(blocked);
+      await this.revertCompletedPackSessionToPicked(tx, id, payload, message);
+      return;
+    }
+
+    if (from === dn_status.PACKING && toStatus === dn_status.PICKED) {
+      const blocked = this.packerRevertBlockedByShipping(from, toStatus);
+      if (blocked) throw new BadRequestException(blocked);
+      await this.revertOpenPackSessionToPicked(tx, id, payload, message);
+      return;
+    }
+
+    await this.persistDnStatusChange(tx, id, from, toStatus, payload, message);
+  }
+
+  private packerRevertBlockedByShipping(
+    from: dn_status,
+    toStatus: dn_status,
+  ): string | null {
+    const toPickOrPack =
+      toStatus === dn_status.PICKED || toStatus === dn_status.PACKING;
+    if (!toPickOrPack) return null;
+
+    if (
+      from === dn_status.SHIPPING_IN_PROGRESS ||
+      from === dn_status.SHIPPED
+    ) {
+      return 'Cannot return to picking or packing after shipping has started.';
+    }
+
+    return null;
+  }
+
+  private pickingClaimUpdate(
+    from: dn_status,
+    to: dn_status,
+    userId: string,
+  ): { picking_started_by_user_id: string | null } | Record<string, never> {
+    if (to === dn_status.PICKING) {
+      return { picking_started_by_user_id: userId };
+    }
+    if (from === dn_status.PICKING) {
+      return { picking_started_by_user_id: null };
+    }
+    return {};
+  }
+
+  async setPriority(
+    id: string,
+    toPriorityNo: number,
+    reason: string,
+    payload: JwtPayload,
+  ) {
+    const dn = await this.prisma.deliveryNote.findUnique({ where: { id } });
+    if (!dn) {
+      throw new NotFoundException('Delivery note not found');
+    }
+
+    const role = await this.getActiveRole(payload);
+    if (role.code !== 'SUPERVISOR') {
+      throw new ForbiddenException('Only supervisors can set priority');
+    }
+    const ok = await this.permissions.roleHasPermission(
+      payload.activeRoleId,
+      'dn.priority.set',
+    );
+    if (!ok) {
+      throw new ForbiddenException('Missing permission: dn.priority.set');
+    }
+
+    if (toPriorityNo === dn.current_priority_no) {
+      throw new BadRequestException('Priority unchanged');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.deliveryNote.update({
+        where: { id },
+        data: { current_priority_no: toPriorityNo },
+      }),
+      this.prisma.dnPriorityHistory.create({
+        data: {
+          delivery_note_id: id,
+          from_priority_no: dn.current_priority_no,
+          to_priority_no: toPriorityNo,
+          reason: reason.trim(),
+          actor_user_id: payload.sub,
+          actor_role_id: payload.activeRoleId,
+          source: 'MANUAL',
+        },
+      }),
+    ]);
+
+    return this.findOne(id, payload);
+  }
+
+  async setRush(
+    id: string,
+    rushed: boolean,
+    reason: string,
+    payload: JwtPayload,
+  ) {
+    const dn = await this.prisma.deliveryNote.findUnique({ where: { id } });
+    if (!dn) {
+      throw new NotFoundException('Delivery note not found');
+    }
+
+    const role = await this.getActiveRole(payload);
+    if (role.code !== 'SUPERVISOR' && role.code !== 'SYSTEM') {
+      throw new ForbiddenException('Only supervisors can set rush');
+    }
+    const ok = await this.permissions.roleHasPermission(
+      payload.activeRoleId,
+      'dn.rush.set',
+    );
+    if (!ok) {
+      throw new ForbiddenException('Missing permission: dn.rush.set');
+    }
+
+    if (rushed === dn.is_rushed) {
+      throw new BadRequestException(
+        rushed ? 'Delivery note is already rushed' : 'Delivery note is not rushed',
+      );
+    }
+
+    if (rushed && !deliveryNoteEligibleForRush(dn.current_status, dn.is_open)) {
+      throw new BadRequestException(
+        rushMarkBlockedMessage(dn.current_status, dn.is_open),
+      );
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.deliveryNote.update({
+        where: { id },
+        data: {
+          is_rushed: rushed,
+          latest_rush_reason: rushed ? reason.trim() : null,
+        },
+      }),
+      this.prisma.dnRushHistory.create({
+        data: {
+          delivery_note_id: id,
+          from_rushed: dn.is_rushed,
+          to_rushed: rushed,
+          reason: reason.trim(),
+          actor_user_id: payload.sub,
+          actor_role_id: payload.activeRoleId,
+          source: 'MANUAL',
+        },
+      }),
+    ]);
+
+    return this.findOne(id, payload);
+  }
+
+  private async getActiveRole(payload: JwtPayload) {
+    const role = await this.prisma.role.findUnique({
+      where: { id: payload.activeRoleId },
+    });
+    if (!role) {
+      throw new ForbiddenException('Active role not found');
+    }
+    return role;
+  }
+
+  private async computeAllowedNextStatuses(
+    payload: JwtPayload,
+    roleCode: string,
+    from: dn_status,
+    pickingClaimUserId: string | null,
+  ): Promise<dn_status[]> {
+    const out: dn_status[] = [];
+    for (const to of ALL_DN_STATUSES) {
+      const meta = getTransitionMeta(from, to);
+      if (!meta) continue;
+      if (!meta.allowedRoles.includes(roleCode)) continue;
+      if (
+        from === dn_status.PICKING &&
+        to === dn_status.PICKED &&
+        pickingClaimUserId !== null &&
+        pickingClaimUserId !== payload.sub
+      ) {
+        continue;
+      }
+      const has = await this.permissions.roleHasPermission(
+        payload.activeRoleId,
+        meta.permission,
+      );
+      if (has) out.push(to);
+    }
+    return out;
+  }
+
+  private serializeWorkflowActor(user: {
+    id: string;
+    email: string;
+    display_name: string | null;
+  }) {
+    const display_name = user.display_name?.trim() || null;
+    return {
+      id: user.id,
+      email: user.email,
+      display_name,
+    };
+  }
+
+  private buildWorkflowHandoff(input: {
+    statusHistory: WorkflowStatusHistoryRow[];
+    pickingStartedBy: WorkflowActorRow | null;
+    packCreator: WorkflowActorRow | null;
+    shipper: WorkflowActorRow | null;
+  }) {
+    const actorFromHistory = (toStatus: string) => {
+      const row = input.statusHistory.find((h) => h.to_status === toStatus);
+      return row?.actor_user
+        ? this.serializeWorkflowActor(row.actor_user)
+        : null;
+    };
+
+    return {
+      picked_by:
+        (input.pickingStartedBy
+          ? this.serializeWorkflowActor(input.pickingStartedBy)
+          : null) ?? actorFromHistory('PICKED'),
+      packed_by:
+        (input.packCreator
+          ? this.serializeWorkflowActor(input.packCreator)
+          : null) ?? actorFromHistory('PACKED'),
+      shipped_by:
+        (input.shipper
+          ? this.serializeWorkflowActor(input.shipper)
+          : null) ?? actorFromHistory('SHIPPED'),
+    };
+  }
+
+  private serializeDeliveryNote(dn: {
+    lines: Array<Record<string, unknown>>;
+    status_history: unknown[];
+    priority_history: unknown[];
+    customer?: { sold_to_name: string } | null;
+    ship_to_location?: {
+      ship_to_name: string;
+      street1: string | null;
+      street2: string | null;
+      city: string | null;
+      state_region: string | null;
+      postal_code: string | null;
+      country_code: string | null;
+      country_name: string | null;
+    } | null;
+    sold_to_code?: string;
+    ship_to_code?: string;
+    [key: string]: unknown;
+  }) {
+    const {
+      lines,
+      status_history,
+      priority_history,
+      customer,
+      ship_to_location,
+      ...rest
+    } = dn;
+    const soldToCode = String(rest.sold_to_code ?? '');
+    const shipToCode = String(rest.ship_to_code ?? '');
+    const sold_to_name = customer?.sold_to_name?.trim() || soldToCode;
+    const ship_to_name = ship_to_location?.ship_to_name?.trim() || shipToCode;
+    const ship_to_location_out = ship_to_location
+      ? {
+          ship_to_name: ship_to_location.ship_to_name,
+          street1: ship_to_location.street1,
+          street2: ship_to_location.street2,
+          city: ship_to_location.city,
+          state_region: ship_to_location.state_region,
+          postal_code: ship_to_location.postal_code,
+          country_code: ship_to_location.country_code,
+          country_name: ship_to_location.country_name,
+        }
+      : null;
+    return {
+      ...rest,
+      sold_to_name,
+      ship_to_name,
+      ship_to_location: ship_to_location_out,
+      lines: lines.map((line) => {
+        const l = line as Record<string, unknown>;
+        return {
+          ...l,
+          order_qty: l.order_qty != null ? String(l.order_qty) : null,
+          open_qty: l.open_qty != null ? String(l.open_qty) : null,
+          shipped_qty: l.shipped_qty != null ? String(l.shipped_qty) : null,
+          unit_price: l.unit_price != null ? String(l.unit_price) : null,
+          line_amount: l.line_amount != null ? String(l.line_amount) : null,
+        };
+      }),
+      status_history,
+      priority_history,
+    };
+  }
+}

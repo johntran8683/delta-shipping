@@ -1,0 +1,28 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: delta-shipping-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: delta-shipping-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: delta
+      POSTGRES_PASSWORD: delta
+      POSTGRES_DB: delta_shipping
+    ports:
+      # Use 5433 on host if another Postgres already owns 5432 (common on dev machines).
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema-v1.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+
+volumes:
+  postgres_data:
+  redis_data:
