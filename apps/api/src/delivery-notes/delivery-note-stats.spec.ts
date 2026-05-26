@@ -14,12 +14,8 @@ describe('delivery-note-stats', () => {
       0,
       0,
     );
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: DELIVERY_NOTE_STATS_TIMEZONE,
-      hour: 'numeric',
-      hour12: false,
-    }).format(utc);
-    expect(Number(parts)).toBe(0);
+    // PST (UTC-8); avoid asserting on Intl hour strings (midnight can be "24" on Linux).
+    expect(utc.toISOString()).toBe('2026-01-15T08:00:00.000Z');
   });
 
   it('returns a full local day range', () => {

@@ -31,11 +31,15 @@ function zonedParts(timeZone: string, utc: Date): ZonedParts {
   for (const p of fmt.formatToParts(utc)) {
     if (p.type !== 'literal') map[p.type] = p.value;
   }
+  // Some ICU builds (Linux CI) report local midnight as hour 24 instead of 0.
+  let hour = Number(map.hour);
+  if (hour === 24) hour = 0;
+
   return {
     year: Number(map.year),
     month: Number(map.month),
     day: Number(map.day),
-    hour: Number(map.hour),
+    hour,
     minute: Number(map.minute),
     second: Number(map.second),
   };
