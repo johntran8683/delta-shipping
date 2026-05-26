@@ -110,7 +110,9 @@ const MANDATORY_HEADER_RULES: {
  * Validates the first worksheet has all mandatory columns before queuing import.
  * Uses the same header matching rules as the ingest service (exact vs fuzzy where applicable).
  */
-export function validateDailyDnExcelHeaders(buffer: Buffer): DailyDnHeaderValidationResult {
+export function validateDailyDnExcelHeaders(
+  buffer: Buffer,
+): DailyDnHeaderValidationResult {
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   if (!workbook.SheetNames.length) {
     return {

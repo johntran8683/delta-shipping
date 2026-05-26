@@ -4,7 +4,10 @@ export type CarrierAccountRow = {
 };
 
 export function normalizeCarrierToken(value: string): string {
-  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
 }
 
 export function carrierMatchesShippingType(

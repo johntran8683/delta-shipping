@@ -12,6 +12,7 @@ import type { JwtPayload } from '../auth/jwt-payload';
 import { PermissionsService } from '../auth/permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 /** CJS-only package: default import emits `.default`, which breaks at runtime. */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 import PDFKit = require('pdfkit');
 import {
   filterCarrierAccountsForShippingType,
@@ -312,10 +313,7 @@ export class DeliveryNotesService {
       };
     });
 
-    const items = await attachDeliveryNoteStatusContexts(
-      this.prisma,
-      mapped,
-    );
+    const items = await attachDeliveryNoteStatusContexts(this.prisma, mapped);
 
     return {
       items,
@@ -979,7 +977,7 @@ export class DeliveryNotesService {
         margin: marginPt,
         autoFirstPage: true,
       });
-      doc.on('data', (c) => chunks.push(c as Buffer));
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('error', reject);
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       try {
@@ -1265,7 +1263,9 @@ export class DeliveryNotesService {
     message?: string,
     trackingNumber?: string,
   ): Promise<void> {
-    const anchor = await tx.deliveryNote.findUnique({ where: { id: anchorId } });
+    const anchor = await tx.deliveryNote.findUnique({
+      where: { id: anchorId },
+    });
     if (!anchor) {
       throw new NotFoundException('Delivery note not found');
     }
@@ -1722,10 +1722,7 @@ export class DeliveryNotesService {
       toStatus === dn_status.PICKED || toStatus === dn_status.PACKING;
     if (!toPickOrPack) return null;
 
-    if (
-      from === dn_status.SHIPPING_IN_PROGRESS ||
-      from === dn_status.SHIPPED
-    ) {
+    if (from === dn_status.SHIPPING_IN_PROGRESS || from === dn_status.SHIPPED) {
       return 'Cannot return to picking or packing after shipping has started.';
     }
 
@@ -1819,7 +1816,9 @@ export class DeliveryNotesService {
 
     if (rushed === dn.is_rushed) {
       throw new BadRequestException(
-        rushed ? 'Delivery note is already rushed' : 'Delivery note is not rushed',
+        rushed
+          ? 'Delivery note is already rushed'
+          : 'Delivery note is not rushed',
       );
     }
 
@@ -1927,9 +1926,8 @@ export class DeliveryNotesService {
           ? this.serializeWorkflowActor(input.packCreator)
           : null) ?? actorFromHistory('PACKED'),
       shipped_by:
-        (input.shipper
-          ? this.serializeWorkflowActor(input.shipper)
-          : null) ?? actorFromHistory('SHIPPED'),
+        (input.shipper ? this.serializeWorkflowActor(input.shipper) : null) ??
+        actorFromHistory('SHIPPED'),
     };
   }
 

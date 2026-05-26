@@ -5,7 +5,10 @@ import { PrismaService } from '../prisma/prisma.service';
 export class PermissionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async roleHasPermission(roleId: string, permissionCode: string): Promise<boolean> {
+  async roleHasPermission(
+    roleId: string,
+    permissionCode: string,
+  ): Promise<boolean> {
     const role = await this.prisma.role.findUnique({
       where: { id: roleId },
       select: { code: true },

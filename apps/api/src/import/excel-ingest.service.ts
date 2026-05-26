@@ -1,10 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  batch_status,
-  dn_status,
-  error_severity,
-  source_type,
-} from '@prisma/client';
+import { batch_status, dn_status, error_severity } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import { mkdir, readFile, unlink } from 'fs/promises';
 import * as path from 'path';
@@ -67,8 +62,7 @@ export class ExcelIngestService {
         data,
       }));
 
-      const sheetKeys =
-        rowCtxs.length > 0 ? Object.keys(rowCtxs[0]!.data) : [];
+      const sheetKeys = rowCtxs.length > 0 ? Object.keys(rowCtxs[0]!.data) : [];
       const sheetHasStreetColumn = sheetHasStreetImportColumn(sheetKeys);
       const hasSoldToCol = sheetHasSoldToCodeColumn(sheetKeys);
       const hasShipToCodeCol = sheetHasShipToCodeColumn(sheetKeys);
@@ -153,21 +147,21 @@ export class ExcelIngestService {
             // Existing DNs are intentionally left unchanged, so partner-code
             // columns are not required for these rows.
           } else {
-          for (const ctx of sorted) {
-            errorRows += 1;
-            await this.prisma.importRowError.create({
-              data: {
-                batch_id: batchId,
-                sheet_name: sheetName.slice(0, 120),
-                row_number: ctx.excelRow,
-                error_code: 'MISSING_CUSTOMER',
-                severity: error_severity.BLOCKER,
-                error_message: `Missing Sold-to or Ship-to for DN ${dnNumber}`,
-                raw_row_json: ctx.data as object,
-              },
-            });
-          }
-          continue;
+            for (const ctx of sorted) {
+              errorRows += 1;
+              await this.prisma.importRowError.create({
+                data: {
+                  batch_id: batchId,
+                  sheet_name: sheetName.slice(0, 120),
+                  row_number: ctx.excelRow,
+                  error_code: 'MISSING_CUSTOMER',
+                  severity: error_severity.BLOCKER,
+                  error_message: `Missing Sold-to or Ship-to for DN ${dnNumber}`,
+                  raw_row_json: ctx.data as object,
+                },
+              });
+            }
+            continue;
           }
         }
 
@@ -199,7 +193,9 @@ export class ExcelIngestService {
               sheet_name: sheetName.slice(0, 120),
               row_number: headerCtx.excelRow,
               error_code:
-                r === 'created' ? IMPORT_DN_CREATED_CODE : IMPORT_DN_EXISTING_CODE,
+                r === 'created'
+                  ? IMPORT_DN_CREATED_CODE
+                  : IMPORT_DN_EXISTING_CODE,
               severity: error_severity.INFO,
               error_message:
                 r === 'created'
@@ -234,8 +230,7 @@ export class ExcelIngestService {
               row_number: headerCtx.excelRow,
               error_code: 'GROUP_FAILED',
               severity: error_severity.BLOCKER,
-              error_message:
-                e instanceof Error ? e.message : String(e),
+              error_message: e instanceof Error ? e.message : String(e),
               raw_row_json: header as object,
             },
           });
@@ -252,8 +247,7 @@ export class ExcelIngestService {
       await this.prisma.importBatch.update({
         where: { id: batchId },
         data: {
-          status:
-            errorRows > 0 ? batch_status.PARTIAL : batch_status.SUCCESS,
+          status: errorRows > 0 ? batch_status.PARTIAL : batch_status.SUCCESS,
           completed_at: new Date(),
           success_rows: dnsCreated + dnsExisting,
           error_rows: errorRows,
@@ -270,7 +264,9 @@ export class ExcelIngestService {
           status: batch_status.FAILED,
           completed_at: new Date(),
           summary_message:
-            e instanceof Error ? e.message.slice(0, 2000) : 'Excel import failed',
+            e instanceof Error
+              ? e.message.slice(0, 2000)
+              : 'Excel import failed',
         },
       });
       throw e;
@@ -335,7 +331,10 @@ export class ExcelIngestService {
       ),
       255,
     );
-    const city = toStr(pickCell(header, 'Ship-to City', 'Ship to City', 'City'), 120);
+    const city = toStr(
+      pickCell(header, 'Ship-to City', 'Ship to City', 'City'),
+      120,
+    );
     const state_region = toStr(
       pickCell(
         header,
@@ -447,9 +446,7 @@ export class ExcelIngestService {
     const shippingType = toStr(pickCell(header, 'Shipping Type'), 120);
     const currency = toStr(pickCurrency(header), 10);
     const dnCreate = toDateOnly(pickCell(header, 'DN Create date'));
-    const reqDel = toDateOnly(
-      pickCell(header, 'Customer Req. Delivery Date'),
-    );
+    const reqDel = toDateOnly(pickCell(header, 'Customer Req. Delivery Date'));
     const projShip = toDateOnly(pickCell(header, 'Projected Ship Date'));
     const poDate = toDateOnly(pickCell(header, 'P/O Date'));
     const customerPo = toStr(pickCell(header, 'Customer PO'), 80);
@@ -629,7 +626,9 @@ export class ExcelIngestService {
     const lineData = {
       so_number: toStr(pickCell(data, 'SO#', 'SO', 'Sales Order'), 30),
       material_code: toStr(
-        pickCell(data, 'Material', 'Material Code', 'Mat.'), 80),
+        pickCell(data, 'Material', 'Material Code', 'Mat.'),
+        80,
+      ),
       material_description:
         matDesc == null || matDesc === ''
           ? null
@@ -640,7 +639,10 @@ export class ExcelIngestService {
       unit_price: toDecimal(pickCell(data, 'Price')),
       line_amount: toDecimal(pickCell(data, 'Amount')),
       delivery_date: toDateOnly(pickCell(data, 'Delivery Date')),
-      material_type: toStr(pickCell(data, 'Material type', 'Material Type'), 40),
+      material_type: toStr(
+        pickCell(data, 'Material type', 'Material Type'),
+        40,
+      ),
     };
 
     const existingLine = await tx.deliveryNoteLine.findUnique({

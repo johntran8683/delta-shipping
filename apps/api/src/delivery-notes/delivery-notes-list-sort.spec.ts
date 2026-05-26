@@ -4,8 +4,12 @@ const rushFirst = { is_rushed: 'desc' as const };
 
 describe('buildDeliveryNoteListOrderBy', () => {
   it('always puts rushed notes first', () => {
-    expect(buildDeliveryNoteListOrderBy('dn_number', 'asc')[0]).toEqual(rushFirst);
-    expect(buildDeliveryNoteListOrderBy('customer', 'desc')[0]).toEqual(rushFirst);
+    expect(buildDeliveryNoteListOrderBy('dn_number', 'asc')[0]).toEqual(
+      rushFirst,
+    );
+    expect(buildDeliveryNoteListOrderBy('customer', 'desc')[0]).toEqual(
+      rushFirst,
+    );
   });
 
   it('defaults to rush first then priority asc', () => {

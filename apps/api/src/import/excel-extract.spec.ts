@@ -22,9 +22,9 @@ describe('pickCell', () => {
       'Sold-to': '200055',
       'Sold-to Name': 'Example Corp',
     };
-    expect(
-      pickCell(row, 'Sold-to Name', 'Sold to Name', 'Customer Name'),
-    ).toBe('Example Corp');
+    expect(pickCell(row, 'Sold-to Name', 'Sold to Name', 'Customer Name')).toBe(
+      'Example Corp',
+    );
   });
 
   it('still matches when the Excel header is longer than the label', () => {

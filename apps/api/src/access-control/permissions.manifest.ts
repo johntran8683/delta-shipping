@@ -132,13 +132,15 @@ const manifestByCode = new Map(
   PERMISSION_MANIFEST.map((p) => [p.code, p] as const),
 );
 
-export function getManifestEntry(code: string): PermissionManifestEntry | undefined {
+export function getManifestEntry(
+  code: string,
+): PermissionManifestEntry | undefined {
   return manifestByCode.get(code.trim().toLowerCase());
 }
 
-export function sortPermissionsForMatrix<T extends { code: string; sortOrder?: number }>(
-  items: T[],
-): T[] {
+export function sortPermissionsForMatrix<
+  T extends { code: string; sortOrder?: number },
+>(items: T[]): T[] {
   return [...items].sort((a, b) => {
     const ma = manifestByCode.get(a.code);
     const mb = manifestByCode.get(b.code);

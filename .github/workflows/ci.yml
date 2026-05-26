@@ -1,0 +1,180 @@
+# =============================================================================
+# Continuous Integration (CI) for Delta Shipping
+# =============================================================================
+# This file tells GitHub Actions what to run automatically when you push code
+# or open a pull request. Think of it as a recipe that GitHub's servers follow:
+# clone your repo → install tools → run checks → report pass/fail on the PR.
+#
+# Full guide: docs/ci-cd.md
+# =============================================================================
+
+# Display name shown in the GitHub Actions tab (e.g. "CI #42")
+name: CI
+
+# -----------------------------------------------------------------------------
+# WHEN does this workflow run? (triggers)
+# -----------------------------------------------------------------------------
+# GitHub starts a new "workflow run" when an event below matches.
+on:
+  # Someone pushed commits to the `main` branch (direct push or merge).
+  push:
+    branches: [main]
+
+  # Someone opened/updated a PR whose target branch is `main`.
+  # Feature branches get CI too, so you catch bugs before merging.
+  pull_request:
+    branches: [main]
+
+# -----------------------------------------------------------------------------
+# CONCURRENCY — avoid wasting minutes on outdated runs
+# -----------------------------------------------------------------------------
+# If you push 3 commits quickly, without this GitHub would run CI three times
+# in parallel. `cancel-in-progress: true` cancels the older runs when a newer
+# one starts for the same group (same workflow + same branch/PR).
+#
+# `github.ref` is like `refs/heads/main` or `refs/pull/12/merge` — one group
+# per branch/PR so PR #5 does not cancel PR #6.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# -----------------------------------------------------------------------------
+# WORKFLOW-LEVEL ENV — variables available to every job in this file
+# -----------------------------------------------------------------------------
+# These are NOT secrets; they are plain text defaults for CI only.
+# Real production secrets (JWT, DB passwords) live in GitHub Environment secrets,
+# not here — but the API build/tests may still read env vars if code expects them.
+env:
+  NODE_VERSION: "20" # Must match README (Node 20+)
+  PNPM_VERSION: "9.15.0" # Must match packageManager in root package.json
+  # Next.js bakes NEXT_PUBLIC_* into the client bundle at build time.
+  NEXT_PUBLIC_API_URL: http://localhost:3001
+  # Placeholder so anything importing config during build does not fail.
+  JWT_SECRET: ci-jwt-secret-minimum-32-characters-long
+  # Used by the database-migrations job (Postgres service on localhost:5432).
+  DATABASE_URL: postgresql://delta:delta@localhost:5432/delta_shipping
+
+# -----------------------------------------------------------------------------
+# JOBS — units of work that can run in parallel
+# -----------------------------------------------------------------------------
+# Each job gets a fresh Ubuntu VM. Jobs do not share disk by default.
+# If either job fails, the whole workflow is marked failed (red X on the PR).
+jobs:
+  # ===========================================================================
+  # JOB 1: Fast feedback — lint, unit tests, production build
+  # ===========================================================================
+  # This job does NOT start Postgres. API unit tests are pure logic (Jest specs)
+  # and do not need a live database.
+  lint-test-build:
+    name: Lint, test, and build # Human-readable name in the Actions UI
+    runs-on: ubuntu-latest # GitHub-hosted Linux runner (clean VM each run)
+
+    steps:
+      # --- Step: get source code onto the runner ---
+      - name: Checkout
+        uses: actions/checkout@v4 # Official action: git clone this repo at the triggering SHA
+
+      # --- Step: install pnpm (package manager for the monorepo) ---
+      # Node does not include pnpm; this action puts `pnpm` on PATH.
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }} # ${{ }} = expression syntax for workflow variables
+
+      # --- Step: install Node.js + cache pnpm store ---
+      # `cache: pnpm` speeds up later runs by reusing downloaded packages when
+      # pnpm-lock.yaml is unchanged.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # --- Step: install all workspace dependencies (apps/api, apps/web, root) ---
+      # `--frozen-lockfile` fails if package.json and pnpm-lock.yaml disagree.
+      # That prevents "works on my machine" drift in CI.
+      # postinstall in apps/api runs `prisma generate` automatically.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # --- Step: static analysis (no --fix; CI must not mutate the repo) ---
+      # Root script `pnpm lint:ci` runs eslint in api + web with lint:ci scripts.
+      - name: Lint
+        run: pnpm lint:ci
+
+      # --- Step: API unit tests (Jest, *.spec.ts under apps/api/src) ---
+      # 32 tests as of setup — import parsing, policies, sorting, etc.
+      - name: Unit tests (API)
+        run: pnpm test:ci
+
+      # --- Step: compile NestJS API + build Next.js for production ---
+      # Catches TypeScript errors and Next build failures (missing env, bad imports).
+      # NEXT_PUBLIC_API_URL comes from workflow `env` above.
+      - name: Build API and web
+        run: pnpm build:ci
+
+  # ===========================================================================
+  # JOB 2: Database — prove schema + Prisma migrations work on a fresh Postgres
+  # ===========================================================================
+  # Runs IN PARALLEL with lint-test-build (faster total CI time).
+  # Simulates a new production database: apply schema-v1.sql, then Prisma migrate.
+  database-migrations:
+    name: Validate DB schema and migrations
+    runs-on: ubuntu-latest
+
+    # SERVICE CONTAINERS — sidecar Docker containers on the same runner network.
+    # The job can reach Postgres at host `postgres` (service name) or localhost:5432
+    # because we map port 5432 below. This is NOT your production database.
+    services:
+      postgres:
+        image: postgres:16-alpine # Same major version as docker-compose.yml locally
+        env:
+          POSTGRES_USER: delta
+          POSTGRES_PASSWORD: delta
+          POSTGRES_DB: delta_shipping
+        ports:
+          # host:container — DATABASE_URL uses localhost:5432 on the runner
+          - 5432:5432
+        # GitHub waits until health checks pass before running job steps.
+        # Without this, `psql` might run before Postgres accepts connections.
+        options: >-
+          --health-cmd "pg_isready -U delta -d delta_shipping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # --- Step: load canonical SQL DDL (tables, enums, indexes) ---
+      # schema-v1.sql is the source of truth created before Prisma migrations.
+      # `psql` is not preinstalled on ubuntu-latest; we install postgresql-client.
+      # ON_ERROR_STOP=1: abort on first SQL error (fail the step).
+      - name: Apply base schema
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f schema-v1.sql
+
+      # --- Step: Prisma Migrate on a "legacy" DB that already has schema-v1 objects ---
+      # Our DB was not created empty by Prisma, so we:
+      #   1) mark the first two migrations as already applied (resolve --applied)
+      #   2) run `migrate deploy` for newer migrations only
+      # See scripts/prisma-baseline-and-deploy.sh and docs/ci-cd.md.
+      - name: Baseline and deploy Prisma migrations
+        run: bash scripts/prisma-baseline-and-deploy.sh

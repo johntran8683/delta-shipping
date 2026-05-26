@@ -1,4 +1,10 @@
-import { IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 /** Lowercase identifier: letters, digits, dots, underscores (e.g. dn.read). */
 export class CreatePermissionDto {

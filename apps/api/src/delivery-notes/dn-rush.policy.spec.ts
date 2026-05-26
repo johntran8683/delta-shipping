@@ -6,20 +6,14 @@ import {
 
 describe('deliveryNoteEligibleForRush', () => {
   it('allows open prioritized notes', () => {
-    expect(
-      deliveryNoteEligibleForRush(dn_status.PRIORITIZED, true),
-    ).toBe(true);
+    expect(deliveryNoteEligibleForRush(dn_status.PRIORITIZED, true)).toBe(true);
   });
 
   it('blocks cancelled, on hold, and closed', () => {
-    expect(deliveryNoteEligibleForRush(dn_status.CANCELLED, true)).toBe(
-      false,
-    );
+    expect(deliveryNoteEligibleForRush(dn_status.CANCELLED, true)).toBe(false);
     expect(deliveryNoteEligibleForRush(dn_status.ON_HOLD, true)).toBe(false);
     expect(deliveryNoteEligibleForRush(dn_status.PICKING, false)).toBe(false);
-    expect(deliveryNoteEligibleForRush(dn_status.SHIPPED, false)).toBe(
-      false,
-    );
+    expect(deliveryNoteEligibleForRush(dn_status.SHIPPED, false)).toBe(false);
   });
 });
 
@@ -29,8 +23,6 @@ describe('rushMarkBlockedMessage', () => {
       /cancelled/i,
     );
     expect(rushMarkBlockedMessage(dn_status.ON_HOLD, true)).toMatch(/hold/i);
-    expect(rushMarkBlockedMessage(dn_status.SHIPPED, false)).toMatch(
-      /closed/i,
-    );
+    expect(rushMarkBlockedMessage(dn_status.SHIPPED, false)).toMatch(/closed/i);
   });
 });

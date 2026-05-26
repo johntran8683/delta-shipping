@@ -118,10 +118,19 @@ Re-run **`pnpm prisma:seed`** in `apps/api` after pulling these changes so **`dn
 | `apps/api/prisma/schema.prisma` | Prisma schema (matches SQL tables) |
 | `database-design-document-v1.md` | Field-level DB spec |
 
+## CI/CD
+
+GitHub Actions run **lint**, **unit tests**, **build**, and **Postgres migration checks** on every PR and push to `main`. Successful merges can trigger a **deploy** workflow that uploads build artifacts (configure production SSH/cloud deploy in `.github/workflows/deploy.yml`).
+
+See [docs/ci-cd.md](docs/ci-cd.md) for setup, environment variables, and enabling real production deploy.
+
 ## Scripts (root)
 
 | Script | Description |
 |--------|-------------|
+| `pnpm lint:ci` | ESLint (no auto-fix) for API and web |
+| `pnpm test:ci` | API unit tests (Jest) |
+| `pnpm build:ci` | Production build for API and web |
 | `pnpm db:check-dns` | Verify `registry-1.docker.io` resolves (before `db:up`) |
 | `pnpm db:up` | Start Postgres container |
 | `pnpm db:down` | Stop containers |

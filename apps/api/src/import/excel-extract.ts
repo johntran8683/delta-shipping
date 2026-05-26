@@ -2,13 +2,15 @@ import { Prisma } from '@prisma/client';
 
 /** Normalize header for fuzzy match. */
 export function normHeader(s: string): string {
-  return s
-    .trim()
-    .toLowerCase()
-    // Excel often uses hyphens ("Ship-to-Street") where we list spaces ("Ship-to Street")
-    .replace(/[-_]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/[#]/g, '#');
+  return (
+    s
+      .trim()
+      .toLowerCase()
+      // Excel often uses hyphens ("Ship-to-Street") where we list spaces ("Ship-to Street")
+      .replace(/[-_]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/[#]/g, '#')
+  );
 }
 
 /** Find value from Excel row using candidate header labels (exact or normalized). */

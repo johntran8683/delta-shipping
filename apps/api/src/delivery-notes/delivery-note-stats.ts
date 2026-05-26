@@ -100,6 +100,8 @@ export function getLocalDayBoundsUtc(
   return { localDate, startUtc, endUtc };
 }
 
-export function getVancouverDayBoundsUtc(ref: Date = new Date()): LocalDayBoundsUtc {
+export function getVancouverDayBoundsUtc(
+  ref: Date = new Date(),
+): LocalDayBoundsUtc {
   return getLocalDayBoundsUtc(DELIVERY_NOTE_STATS_TIMEZONE, ref);
 }

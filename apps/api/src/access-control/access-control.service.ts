@@ -143,9 +143,7 @@ export class AccessControlService {
         const bypassApiMatrix = (
           BYPASS_MATRIX_ROLE_CODES as readonly string[]
         ).includes(r.code);
-        const defaultPermissionCodes = (
-          ROLE_PERMISSION_DEFAULTS[r.code] ?? []
-        )
+        const defaultPermissionCodes = (ROLE_PERMISSION_DEFAULTS[r.code] ?? [])
           .filter((c) => assignableCodes.has(c))
           .sort();
         return {
@@ -203,7 +201,9 @@ export class AccessControlService {
     if (perms.length !== codes.length) {
       const found = new Set(perms.map((p) => p.code));
       const missing = codes.filter((c) => !found.has(c));
-      throw new ConflictException(`Unknown permission codes: ${missing.join(', ')}`);
+      throw new ConflictException(
+        `Unknown permission codes: ${missing.join(', ')}`,
+      );
     }
 
     await this.prisma.$transaction(async (tx) => {

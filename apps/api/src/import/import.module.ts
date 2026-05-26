@@ -7,10 +7,7 @@ import { ImportController } from './import.controller';
 import { ImportService } from './import.service';
 
 @Module({
-  imports: [
-    AuthModule,
-    BullModule.registerQueue({ name: 'excel-import' }),
-  ],
+  imports: [AuthModule, BullModule.registerQueue({ name: 'excel-import' })],
   controllers: [ImportController],
   providers: [ImportService, ExcelIngestService, ExcelImportProcessor],
 })

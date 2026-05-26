@@ -27,7 +27,9 @@ function findAssignedRoleByCode<T extends { code: string }>(
 }
 
 /** Default JWT active role at login: SUPERVISOR first, then SYSTEM, then operational roles. */
-function pickDefaultActiveRole<T extends { code: string }>(assignments: T[]): T {
+function pickDefaultActiveRole<T extends { code: string }>(
+  assignments: T[],
+): T {
   const priority = ['SUPERVISOR', 'SYSTEM', 'PICKER', 'PACKER', 'SHIPPER'];
   const sorted = [...assignments].sort((a, b) => {
     const ia = priority.indexOf(a.code);
@@ -56,9 +58,7 @@ export class AuthService {
     }
 
     const hash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
-    const roleCodes = dto.roleCodes?.length
-      ? dto.roleCodes
-      : ['PICKER'];
+    const roleCodes = dto.roleCodes?.length ? dto.roleCodes : ['PICKER'];
 
     const roles = await this.prisma.role.findMany({
       where: { code: { in: roleCodes }, is_active: true },
@@ -66,7 +66,9 @@ export class AuthService {
     if (roles.length !== roleCodes.length) {
       const found = new Set(roles.map((r) => r.code));
       const missing = roleCodes.filter((c) => !found.has(c));
-      throw new ConflictException(`Unknown or inactive roles: ${missing.join(', ')}`);
+      throw new ConflictException(
+        `Unknown or inactive roles: ${missing.join(', ')}`,
+      );
     }
 
     const user = await this.prisma.user.create({
@@ -203,7 +205,9 @@ export class AuthService {
       throw new UnauthorizedException();
     }
 
-    const activeRole = user.user_roles_assigned.find((ur) => ur.role_id === payload.activeRoleId)?.role;
+    const activeRole = user.user_roles_assigned.find(
+      (ur) => ur.role_id === payload.activeRoleId,
+    )?.role;
     const permissions =
       activeRole?.code && ['SYSTEM', 'SUPERVISOR'].includes(activeRole.code)
         ? await this.prisma.permission.findMany({ select: { code: true } })

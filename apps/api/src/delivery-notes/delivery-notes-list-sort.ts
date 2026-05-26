@@ -29,7 +29,9 @@ export function buildDeliveryNoteListOrderBy(
   sortDir?: string,
 ): Prisma.DeliveryNoteOrderByWithRelationInput[] {
   const dir: Prisma.SortOrder = sortDir === 'desc' ? 'desc' : 'asc';
-  const tieDn: Prisma.DeliveryNoteOrderByWithRelationInput = { dn_number: 'asc' };
+  const tieDn: Prisma.DeliveryNoteOrderByWithRelationInput = {
+    dn_number: 'asc',
+  };
 
   switch (sortBy) {
     case 'priority':

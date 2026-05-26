@@ -1,0 +1,193 @@
+# =============================================================================
+# Continuous Deployment (CD) for Delta Shipping
+# =============================================================================
+# Unlike ci.yml (runs on every PR), this workflow is about *shipping* a build
+# after quality checks pass. Today it:
+#   1) Waits for CI to succeed on main (or you click "Run workflow")
+#   2) Builds production bundles with your real API URL
+#   3) Uploads zip-like "artifacts" you can download from GitHub Actions
+#
+# It does NOT yet copy files to your server — see the commented deploy-to-server
+# job at the bottom and docs/ci-cd.md.
+#
+# Pair with: .github/workflows/ci.yml
+# =============================================================================
+
+name: Deploy
+
+# -----------------------------------------------------------------------------
+# WHEN does this workflow run? (triggers)
+# -----------------------------------------------------------------------------
+on:
+  # CHAIN REACTION: After the "CI" workflow finishes (any conclusion).
+  # We filter success + main branch in the `gate` job — failed CI still starts
+  # this workflow but downstream jobs are skipped.
+  #
+  # `branches: [main]` here means: only CI runs that were triggered ON the
+  # main branch count (not CI runs for feature-branch PRs).
+  workflow_run:
+    workflows: [CI] # Must match `name:` in ci.yml exactly
+    types: [completed] # Fires when CI ends (success, failure, or cancelled)
+    branches: [main]
+
+  # MANUAL: Actions tab → Deploy → "Run workflow" (useful for redeploy without a new commit)
+  workflow_dispatch:
+
+# -----------------------------------------------------------------------------
+# CONCURRENCY — do not cancel an in-flight production deploy
+# -----------------------------------------------------------------------------
+# Unlike CI (cancel old runs), deploy sets cancel-in-progress: false so two
+# overlapping deploys both finish. Change to true if you only want one at a time.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "20"
+  PNPM_VERSION: "9.15.0"
+
+jobs:
+  # ===========================================================================
+  # JOB 1: Gate — should we deploy at all?
+  # ===========================================================================
+  # Lightweight guard. Skipped entirely when conditions fail (job shows "Skipped"
+  # in the UI). `build-artifacts` has `needs: gate`, so it won't run either.
+  gate:
+    name: Verify CI passed
+    # Multi-line `if` (YAML `>` folds newlines to spaces):
+    #   - Manual run: always deploy (you accepted the risk by clicking Run)
+    #   - Auto run: only if CI succeeded AND the commit was on main
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CI gate passed"
+
+  # ===========================================================================
+  # JOB 2: Build and upload release artifacts
+  # ===========================================================================
+  build-artifacts:
+    name: Build release artifacts
+    needs: gate # Runs only after gate completes (not skipped)
+    runs-on: ubuntu-latest
+
+    # GitHub Environment named "production" (Settings → Environments).
+    # - Optional protection rules (required reviewers, wait timer)
+    # - Environment *variables*: vars.NEXT_PUBLIC_API_URL
+    # - Environment *secrets*: DEPLOY_HOST, etc. (for SSH job when enabled)
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # IMPORTANT: workflow_run defaults to checking out `main`, not the commit
+          # that just passed CI. Use the CI run's commit SHA so artifacts match.
+          # workflow_dispatch has no workflow_run → fall back to github.sha.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # postinstall runs prisma generate, but an explicit step makes logs clearer
+      - name: Generate Prisma client
+        run: pnpm --filter api exec prisma generate --schema=prisma/schema.prisma
+
+      # Production web build: NEXT_PUBLIC_API_URL is baked into the JS bundle.
+      # Set in GitHub → Environments → production → Environment variables.
+      # Fallback is a placeholder so the workflow still runs before you configure prod.
+      - name: Build API and web
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://api.example.com' }}
+        run: pnpm build:ci
+
+      # --- Package API: compiled JS + Prisma schema/migrations for the server ---
+      # On the server you still need: node_modules (pnpm install --prod), .env,
+      # Postgres, Redis, and `pnpm prisma:migrate` before `node dist/main`.
+      - name: Package API
+        run: |
+          mkdir -p dist-artifacts/api
+          cp -r apps/api/dist dist-artifacts/api/
+          cp -r apps/api/prisma dist-artifacts/api/
+          cp apps/api/package.json dist-artifacts/api/
+
+      # --- Package web: Next.js build output + static assets ---
+      # Server still needs: node_modules, `pnpm install`, then `pnpm start` in apps/web.
+      # For smaller deploys, consider enabling Next "standalone" output later.
+      - name: Package web (Next.js)
+        run: |
+          mkdir -p dist-artifacts/web
+          cp -r apps/web/.next dist-artifacts/web/
+          cp -r apps/web/public dist-artifacts/web/
+          cp apps/web/package.json dist-artifacts/web/
+          cp apps/web/next.config.ts dist-artifacts/web/
+
+      # Artifacts are stored by GitHub (not in the repo). Download from the
+      # completed workflow run → Artifacts section. Names include commit SHA.
+      - name: Upload API artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-dist-${{ github.sha }}
+          path: dist-artifacts/api
+          retention-days: 30
+
+      - name: Upload web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-next-${{ github.sha }}
+          path: dist-artifacts/web
+          retention-days: 30
+
+  # ===========================================================================
+  # JOB 3 (optional): Push artifacts to your production server
+  # ===========================================================================
+  # Uncomment when you have a VM and SSH access. Add secrets to the
+  # `production` environment: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY.
+  #
+  # This is a starting point — adjust paths, systemd service names, and migration
+  # commands to match your server layout.
+  #
+  # deploy-to-server:
+  #   name: Deploy to production server
+  #   needs: build-artifacts
+  #   runs-on: ubuntu-latest
+  #   environment: production
+  #   steps:
+  #     - name: Download API artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: api-dist-${{ github.sha }}
+  #         path: api
+  #
+  #     - name: Download web artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: web-next-${{ github.sha }}
+  #         path: web
+  #
+  #     - name: Deploy over SSH
+  #       uses: appleboy/ssh-action@v1
+  #       with:
+  #         host: ${{ secrets.DEPLOY_HOST }}
+  #         username: ${{ secrets.DEPLOY_USER }}
+  #         key: ${{ secrets.DEPLOY_SSH_KEY }}
+  #         script: |
+  #           set -e
+  #           cd /opt/delta-shipping
+  #           # Example: rsync/scp artifacts from runner → server (often done in
+  #           # a separate step with scp-action, or git pull + build on server).
+  #           cd apps/api && pnpm prisma:migrate
+  #           sudo systemctl restart delta-api delta-web

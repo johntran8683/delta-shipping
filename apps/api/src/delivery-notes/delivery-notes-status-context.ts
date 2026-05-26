@@ -69,7 +69,10 @@ export async function attachDeliveryNoteStatusContexts<
     const id = row.delivery_note_id;
     if (contextById.has(id)) continue;
     const item = items.find((i) => i.id === id);
-    if (!item || normStatus(item.current_status) !== normStatus(row.to_status)) {
+    if (
+      !item ||
+      normStatus(item.current_status) !== normStatus(row.to_status)
+    ) {
       continue;
     }
     contextById.set(id, {

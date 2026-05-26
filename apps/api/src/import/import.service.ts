@@ -108,10 +108,7 @@ export class ImportService {
     return { batchId: batch.id, status: 'queued' };
   }
 
-  async listImportBatches(
-    query: { limit?: number },
-    payload: JwtPayload,
-  ) {
+  async listImportBatches(query: { limit?: number }, payload: JwtPayload) {
     const ok = await this.permissions.roleHasPermission(
       payload.activeRoleId,
       'import.daily_dn',

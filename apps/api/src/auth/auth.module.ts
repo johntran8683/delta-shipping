@@ -24,6 +24,12 @@ import { PermissionsGuard } from './guards/permissions.guard';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, PermissionsService, PermissionsGuard],
-  exports: [AuthService, PermissionsService, PermissionsGuard, JwtModule, PassportModule],
+  exports: [
+    AuthService,
+    PermissionsService,
+    PermissionsGuard,
+    JwtModule,
+    PassportModule,
+  ],
 })
 export class AuthModule {}

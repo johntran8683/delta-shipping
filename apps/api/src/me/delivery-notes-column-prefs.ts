@@ -19,15 +19,16 @@ export const REQUIRED_DELIVERY_NOTES_COLUMNS: DeliveryNotesColumnKey[] = [
 ];
 
 /** Default when user has never saved: DN, Customer, Ship-to, Ship type, Priority, Req. delivery, Status */
-export const DEFAULT_DELIVERY_NOTES_VISIBLE_COLUMNS: DeliveryNotesColumnKey[] = [
-  'dn_number',
-  'sold_to_name',
-  'ship_to_address',
-  'shipping_type',
-  'current_priority_no',
-  'requested_delivery_date',
-  'current_status',
-];
+export const DEFAULT_DELIVERY_NOTES_VISIBLE_COLUMNS: DeliveryNotesColumnKey[] =
+  [
+    'dn_number',
+    'sold_to_name',
+    'ship_to_address',
+    'shipping_type',
+    'current_priority_no',
+    'requested_delivery_date',
+    'current_status',
+  ];
 
 const ALLOWED = new Set<string>(COLUMN_DISPLAY_ORDER);
 
@@ -38,13 +39,14 @@ export function normalizeDeliveryNotesVisibleColumns(
     return [...DEFAULT_DELIVERY_NOTES_VISIBLE_COLUMNS];
   }
   const selected = input.filter(
-    (x): x is DeliveryNotesColumnKey =>
-      typeof x === 'string' && ALLOWED.has(x),
+    (x): x is DeliveryNotesColumnKey => typeof x === 'string' && ALLOWED.has(x),
   );
   const withRequired = new Set<DeliveryNotesColumnKey>([
     ...selected,
     ...REQUIRED_DELIVERY_NOTES_COLUMNS,
   ]);
   const ordered = COLUMN_DISPLAY_ORDER.filter((k) => withRequired.has(k));
-  return ordered.length > 0 ? ordered : [...DEFAULT_DELIVERY_NOTES_VISIBLE_COLUMNS];
+  return ordered.length > 0
+    ? ordered
+    : [...DEFAULT_DELIVERY_NOTES_VISIBLE_COLUMNS];
 }

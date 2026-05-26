@@ -67,7 +67,10 @@ export class UsersService {
       );
     }
 
-    const passwordHash = await bcrypt.hash(dto.temporaryPassword, BCRYPT_ROUNDS);
+    const passwordHash = await bcrypt.hash(
+      dto.temporaryPassword,
+      BCRYPT_ROUNDS,
+    );
     const user = await this.prisma.user.create({
       data: {
         email,
@@ -143,9 +146,7 @@ export class UsersService {
       select: { user_id: true },
     });
     if (!managed) {
-      throw new ForbiddenException(
-        'You can only manage users you created.',
-      );
+      throw new ForbiddenException('You can only manage users you created.');
     }
   }
 
