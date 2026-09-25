@@ -40,7 +40,7 @@ If Docker Hub stays unreachable, install PostgreSQL locally, apply `schema-v1.sq
 
    If Docker is not available, install PostgreSQL locally and run `schema-v1.sql` manually, then set `DATABASE_URL` accordingly. Run Redis locally or set `REDIS_HOST` / `REDIS_PORT` in `apps/api/.env`.
 
-   **Existing databases:** if you already have the DB from an older `schema-v1.sql`, apply additive DDL under `migrations/sql/` (e.g. `002_delivery_notes_po_fields.sql`) before relying on new columns.
+   **Existing databases:** if you already have the DB from an older `schema-v1.sql`, apply any missing additive migrations under `apps/api/prisma/migrations/` (each `migration.sql` is idempotent) before relying on new columns.
 
 2. **API environment**
 
@@ -54,7 +54,7 @@ If Docker Hub stays unreachable, install PostgreSQL locally, apply `schema-v1.sq
    cd apps/api && pnpm prisma:generate && pnpm prisma:seed
    ```
 
-   Default admin (from `.env.example`): `admin@example.com` / `ChangeMeAdmin123!` — change immediately.
+   Default admin (from `apps/api/.env.example`): `admin@example.com` / `ChangeMeAdmin123!` — change immediately.
 
    Multi-role test user (PICKER + PACKER + SHIPPER, for post-login role choice): `user@example.com` / `ChangeMeUser123!` — configurable via `SEED_MULTI_ROLE_USER_*` in `apps/api/.env`.
 

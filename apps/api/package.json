@@ -10,7 +10,7 @@
     "prisma:generate": "prisma generate --schema=prisma/schema.prisma",
     "prisma:migrate": "prisma migrate deploy --schema=prisma/schema.prisma",
     "prisma:ensure-ui-prefs": "prisma db execute --schema=prisma/schema.prisma --file=prisma/ensure-user-ui-preferences.sql",
-    "prisma:ensure-picking-claim": "prisma db execute --schema=prisma/schema.prisma --file=../../migrations/sql/003_delivery_notes_picking_claim.sql",
+    "prisma:ensure-picking-claim": "prisma db execute --schema=prisma/schema.prisma --file=prisma/migrations/20260510130000_delivery_notes_picking_claim/migration.sql",
     "prisma:seed": "prisma db seed --schema=prisma/schema.prisma",
     "import:undo": "ts-node --compiler-options {\"module\":\"CommonJS\"} scripts/undo-import-batch.ts",
     "build": "nest build",
