@@ -5,6 +5,7 @@
 export type PermissionCategoryId =
   | 'delivery_notes'
   | 'shipping'
+  | 'customers'
   | 'import'
   | 'administration';
 
@@ -26,6 +27,7 @@ export const PERMISSION_CATEGORIES: {
 }[] = [
   { id: 'delivery_notes', label: 'Delivery notes', sortOrder: 10 },
   { id: 'shipping', label: 'Shipping', sortOrder: 20 },
+  { id: 'customers', label: 'Customers', sortOrder: 25 },
   { id: 'import', label: 'Data import', sortOrder: 30 },
   { id: 'administration', label: 'Administration', sortOrder: 40 },
 ];
@@ -82,11 +84,33 @@ export const PERMISSION_MANIFEST: PermissionManifestEntry[] = [
     sortOrder: 10,
   },
   {
+    code: 'customers.read',
+    description: 'View customer profiles and courier accounts',
+    category: 'customers',
+    assignable: true,
+    critical: true,
+    sortOrder: 10,
+  },
+  {
+    code: 'customers.write',
+    description: 'Update customer profiles and courier accounts',
+    category: 'customers',
+    assignable: true,
+    sortOrder: 20,
+  },
+  {
     code: 'import.daily_dn',
     description: 'Import daily DN file / pipeline',
     category: 'import',
     assignable: true,
     sortOrder: 10,
+  },
+  {
+    code: 'import.shipping_ids',
+    description: 'Import Shipping IDs (customer / carrier accounts) file',
+    category: 'import',
+    assignable: true,
+    sortOrder: 20,
   },
   {
     code: 'users.manage',
@@ -114,14 +138,29 @@ export const ROLE_PERMISSION_DEFAULTS: Record<string, string[]> = {
     'dn.status.supervise',
     'dn.priority.set',
     'dn.rush.set',
+    'customers.read',
+    'customers.write',
     'import.daily_dn',
+    'import.shipping_ids',
     'users.manage',
     'permissions.manage',
   ],
-  SYSTEM: ['dn.read', 'users.manage', 'permissions.manage'],
+  SYSTEM: [
+    'dn.read',
+    'customers.read',
+    'customers.write',
+    'import.shipping_ids',
+    'users.manage',
+    'permissions.manage',
+  ],
+  CSA: [
+    'customers.read',
+    'customers.write',
+    'import.shipping_ids',
+  ],
   PICKER: ['dn.read', 'dn.status.pick'],
   PACKER: ['dn.read', 'dn.status.pack'],
-  SHIPPER: ['dn.read', 'shipment.create'],
+  SHIPPER: ['dn.read', 'shipment.create', 'customers.read'],
 };
 
 export const ASSIGNABLE_PERMISSION_CODES = PERMISSION_MANIFEST.filter(

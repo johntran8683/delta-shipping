@@ -29,7 +29,7 @@ The database includes:
 | Table | Purpose |
 |---|---|
 | `users` | Login accounts (email, display name, active flag). |
-| `roles` | Role definitions (`SUPERVISOR`, `PICKER`, `PACKER`, `SHIPPER`, `SYSTEM`); used for authorization and audit. |
+| `roles` | Role definitions (`SUPERVISOR`, `CSA`, `PICKER`, `PACKER`, `SHIPPER`, `SYSTEM`); used for authorization and audit. |
 | `user_roles` | Many-to-many: which roles each user is allowed to use (assigned by admin). |
 | `permissions` | Fine-grained permission codes (e.g. `dn.status.pack`, `shipment.create`). |
 | `role_permissions` | Maps each role to the permissions it grants. |
@@ -110,6 +110,8 @@ Source: `SHIPID_*.xlsm`, sheet `Customers`.
 | `FED EX #` | `customer_carrier_accounts` (`carrier_code=FEDEX`) | Keep as string | No | |
 | `DHL #` | `customer_carrier_accounts` (`carrier_code=DHL`) | Keep as string | No | |
 | Purolator field (if present future) | `customer_carrier_accounts` (`carrier_code=PUROLATOR`) | Keep as string | No | Add when source contains it |
+
+**Implementation status:** Shipping IDs import is live via `POST /import/shipping-ids` (permission `import.shipping_ids`; roles `CSA`, `SUPERVISOR`, `SYSTEM`). Safe merge: accounts missing from the file are not deleted. CSA maintains exceptions on the Customers page (`/customers`).
 
 ---
 

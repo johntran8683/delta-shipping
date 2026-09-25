@@ -16,6 +16,7 @@ import type { JwtPayload } from '../auth/jwt-payload';
 import { PermissionsService } from '../auth/permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateDailyDnExcelHeaders } from './excel-daily-dn-header.validation';
+import { validateShippingIdsExcelHeaders } from './excel-shipping-ids-header.validation';
 import { buildStoredPath, ensureUploadDir } from './excel-ingest.service';
 
 @Injectable()
@@ -30,7 +31,7 @@ export class ImportService {
     @InjectQueue('excel-import') private readonly excelQueue: Queue,
   ) {}
 
-  /** Import APIs require active role SUPERVISOR or SYSTEM (not only the permission). */
+  /** Daily DN import APIs require active role SUPERVISOR or SYSTEM. */
   private async assertSupervisorOrSystemActiveRole(activeRoleId: string) {
     const role = await this.prisma.role.findUnique({
       where: { id: activeRoleId },
@@ -40,6 +41,26 @@ export class ImportService {
         'Import is only available when your active role is SUPERVISOR or SYSTEM (use login “Active role code” or POST /auth/active-role).',
       );
     }
+  }
+
+  /** Shipping IDs import: CSA, SUPERVISOR, or SYSTEM. */
+  private async assertShippingIdsImportRole(activeRoleId: string) {
+    const role = await this.prisma.role.findUnique({
+      where: { id: activeRoleId },
+    });
+    if (!role || !['CSA', 'SUPERVISOR', 'SYSTEM'].includes(role.code)) {
+      throw new ForbiddenException(
+        'Shipping IDs import requires active role CSA, SUPERVISOR, or SYSTEM.',
+      );
+    }
+  }
+
+  private async roleHasAnyImportPerm(activeRoleId: string) {
+    const [daily, shipping] = await Promise.all([
+      this.permissions.roleHasPermission(activeRoleId, 'import.daily_dn'),
+      this.permissions.roleHasPermission(activeRoleId, 'import.shipping_ids'),
+    ]);
+    return { daily, shipping, any: daily || shipping };
   }
 
   async queueExcelFile(
@@ -92,6 +113,7 @@ export class ImportService {
         filePath,
         actorUserId: payload.sub,
         actorRoleId: payload.activeRoleId,
+        sourceType: 'DAILY_DN',
       });
     } catch (err) {
       this.log.error(err);
@@ -108,19 +130,97 @@ export class ImportService {
     return { batchId: batch.id, status: 'queued' };
   }
 
-  async listImportBatches(query: { limit?: number }, payload: JwtPayload) {
-    const ok = await this.permissions.roleHasPermission(
+  async queueShippingIdsFile(
+    file: Express.Multer.File,
+    payload: JwtPayload,
+  ): Promise<{ batchId: string; status: 'queued' }> {
+    const canImport = await this.permissions.roleHasPermission(
       payload.activeRoleId,
-      'import.daily_dn',
+      'import.shipping_ids',
     );
-    if (!ok) {
-      throw new ForbiddenException('Missing permission: import.daily_dn');
+    if (!canImport) {
+      throw new ForbiddenException(
+        'Missing permission import.shipping_ids for your active role.',
+      );
     }
-    await this.assertSupervisorOrSystemActiveRole(payload.activeRoleId);
+    await this.assertShippingIdsImportRole(payload.activeRoleId);
+
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!['.xlsx', '.xlsm', '.xls'].includes(ext)) {
+      throw new BadRequestException(
+        'Upload an Excel file (.xlsx, .xlsm, .xls)',
+      );
+    }
+
+    const headerCheck = validateShippingIdsExcelHeaders(file.buffer);
+    if (!headerCheck.ok) {
+      throw new BadRequestException(headerCheck.message);
+    }
+
+    const batch = await this.prisma.importBatch.create({
+      data: {
+        source_type: source_type.SHIPPING_IDS,
+        file_name: file.originalname.slice(0, 255),
+        status: batch_status.RUNNING,
+        created_by: payload.sub,
+        total_rows: 0,
+      },
+    });
+
+    const uploadDir =
+      process.env.UPLOAD_DIR ||
+      path.join(os.tmpdir(), 'delta-shipping-uploads');
+    await ensureUploadDir(uploadDir);
+    const filePath = buildStoredPath(uploadDir, batch.id);
+    await writeFile(filePath, file.buffer);
+
+    try {
+      await this.excelQueue.add('run', {
+        batchId: batch.id,
+        filePath,
+        actorUserId: payload.sub,
+        actorRoleId: payload.activeRoleId,
+        sourceType: 'SHIPPING_IDS',
+        sheetName: headerCheck.sheetName,
+      });
+    } catch (err) {
+      this.log.error(err);
+      await unlink(filePath).catch(() => undefined);
+      await this.prisma.importBatch
+        .delete({ where: { id: batch.id } })
+        .catch(() => undefined);
+      throw new ServiceUnavailableException(
+        'Could not queue import (Redis unreachable). Start Redis: from repo root run `pnpm db:up` or ensure REDIS_HOST / REDIS_PORT in apps/api/.env match your Redis.',
+      );
+    }
+
+    this.log.log(`Shipping IDs import queued batch ${batch.id}`);
+    return { batchId: batch.id, status: 'queued' };
+  }
+
+  async listImportBatches(query: { limit?: number }, payload: JwtPayload) {
+    const perms = await this.roleHasAnyImportPerm(payload.activeRoleId);
+    if (!perms.any) {
+      throw new ForbiddenException(
+        'Missing permission: import.daily_dn or import.shipping_ids',
+      );
+    }
+    if (perms.daily) {
+      await this.assertSupervisorOrSystemActiveRole(payload.activeRoleId);
+    } else {
+      await this.assertShippingIdsImportRole(payload.activeRoleId);
+    }
 
     const limit = Math.min(query.limit ?? 50, 100);
+    const where =
+      perms.daily && perms.shipping
+        ? undefined
+        : perms.daily
+          ? { source_type: source_type.DAILY_DN }
+          : { source_type: source_type.SHIPPING_IDS };
 
     return this.prisma.importBatch.findMany({
+      where,
       orderBy: { started_at: 'desc' },
       take: limit,
       select: {
@@ -141,16 +241,29 @@ export class ImportService {
     });
   }
 
-  async getImportBatch(id: string, payload: JwtPayload) {
-    const ok = await this.permissions.roleHasPermission(
-      payload.activeRoleId,
-      'import.daily_dn',
-    );
-    if (!ok) {
-      throw new ForbiddenException('Missing permission: import.daily_dn');
+  private async assertCanAccessBatch(
+    batchSource: source_type,
+    activeRoleId: string,
+  ) {
+    const perms = await this.roleHasAnyImportPerm(activeRoleId);
+    if (batchSource === source_type.DAILY_DN) {
+      if (!perms.daily) {
+        throw new ForbiddenException('Missing permission: import.daily_dn');
+      }
+      await this.assertSupervisorOrSystemActiveRole(activeRoleId);
+      return;
     }
-    await this.assertSupervisorOrSystemActiveRole(payload.activeRoleId);
+    if (batchSource === source_type.SHIPPING_IDS) {
+      if (!perms.shipping) {
+        throw new ForbiddenException('Missing permission: import.shipping_ids');
+      }
+      await this.assertShippingIdsImportRole(activeRoleId);
+      return;
+    }
+    throw new ForbiddenException('Unknown import source type');
+  }
 
+  async getImportBatch(id: string, payload: JwtPayload) {
     const batch = await this.prisma.importBatch.findUnique({
       where: { id },
       include: {
@@ -163,18 +276,22 @@ export class ImportService {
     if (!batch) {
       throw new NotFoundException('Import batch not found');
     }
+    await this.assertCanAccessBatch(batch.source_type, payload.activeRoleId);
     return batch;
   }
 
   async getImportBatchReport(id: string, payload: JwtPayload) {
-    const ok = await this.permissions.roleHasPermission(
-      payload.activeRoleId,
-      'import.daily_dn',
-    );
-    if (!ok) {
-      throw new ForbiddenException('Missing permission: import.daily_dn');
+    const batchMeta = await this.prisma.importBatch.findUnique({
+      where: { id },
+      select: { id: true, source_type: true },
+    });
+    if (!batchMeta) {
+      throw new NotFoundException('Import batch not found');
     }
-    await this.assertSupervisorOrSystemActiveRole(payload.activeRoleId);
+    await this.assertCanAccessBatch(
+      batchMeta.source_type,
+      payload.activeRoleId,
+    );
 
     const informationalCodes = [
       ImportService.IMPORT_DN_CREATED_CODE,
@@ -307,6 +424,11 @@ export class ImportService {
     });
     if (!batch) {
       throw new NotFoundException('Import batch not found');
+    }
+    if (batch.source_type !== source_type.DAILY_DN) {
+      throw new BadRequestException(
+        'Only daily DN imports can be undone. Shipping IDs imports do not remove customers or carrier accounts.',
+      );
     }
     if (batch.status === batch_status.RUNNING) {
       throw new BadRequestException(

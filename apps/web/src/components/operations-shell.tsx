@@ -13,7 +13,12 @@ import {
 import { apiBase } from "@/lib/config";
 import { formatApiErrorPayload } from "@/lib/api-error";
 import { formatDnStatusLabel } from "@/lib/dn-status";
-import { canUseDataImport } from "@/lib/import-access";
+import {
+  canSeeCustomersNav,
+  canSeeImportNav,
+  canUseDataImport,
+  canUseShippingIdsImport,
+} from "@/lib/import-access";
 import {
   RoleSwitchModal,
   type RoleSwitchFeedback,
@@ -473,7 +478,10 @@ export function OperationsShell({
 
   const roleCanManageUsers =
     role != null && ["SUPERVISOR", "SYSTEM"].includes(role.toUpperCase());
-  const roleCanImport = canUseDataImport(role);
+  const roleCanDailyImport = canUseDataImport(role);
+  const roleCanShippingIdsImport = canUseShippingIdsImport(role);
+  const roleCanImport = canSeeImportNav(role);
+  const roleCanCustomers = canSeeCustomersNav(role);
 
   function leafClass(active: boolean, collapsed: boolean) {
     const base =
@@ -641,6 +649,27 @@ export function OperationsShell({
               {!sidebarCollapsed ? <span>Delivery notes</span> : null}
             </Link>
 
+            {roleCanCustomers ? (
+              <Link
+                href="/customers"
+                onClick={closeMobileNav}
+                title="Customers"
+                aria-current={
+                  pathname === "/customers" || pathname.startsWith("/customers/")
+                    ? "page"
+                    : undefined
+                }
+                className={leafClass(
+                  pathname === "/customers" ||
+                    pathname.startsWith("/customers/"),
+                  sidebarCollapsed,
+                )}
+              >
+                <span className={navIconBadgeClass()}>CU</span>
+                {!sidebarCollapsed ? <span>Customers</span> : null}
+              </Link>
+            ) : null}
+
             {roleCanImport ? (
             <div className="pt-1">
               <button
@@ -667,21 +696,48 @@ export function OperationsShell({
                     navSubBorderClass(sidebarCollapsed)
                   }
                 >
-                  <Link
-                    href="/import"
-                    onClick={closeMobileNav}
-                    title="New import"
-                    aria-current={pathname === "/import" ? "page" : undefined}
-                    className={leafClass(pathname === "/import", sidebarCollapsed)}
-                  >
-                    {!sidebarCollapsed ? (
-                      <span className="pl-1">New import</span>
-                    ) : (
-                      <span className={`${navIconBadgeClass()} text-xs`} title="New import">
-                        +
-                      </span>
-                    )}
-                  </Link>
+                  {roleCanDailyImport ? (
+                    <Link
+                      href="/import"
+                      onClick={closeMobileNav}
+                      title="Daily DN import"
+                      aria-current={pathname === "/import" ? "page" : undefined}
+                      className={leafClass(pathname === "/import", sidebarCollapsed)}
+                    >
+                      {!sidebarCollapsed ? (
+                        <span className="pl-1">Daily DN import</span>
+                      ) : (
+                        <span className={`${navIconBadgeClass()} text-xs`} title="Daily DN import">
+                          +
+                        </span>
+                      )}
+                    </Link>
+                  ) : null}
+                  {roleCanShippingIdsImport ? (
+                    <Link
+                      href="/import/shipping-ids"
+                      onClick={closeMobileNav}
+                      title="Shipping IDs"
+                      aria-current={
+                        pathname === "/import/shipping-ids" ? "page" : undefined
+                      }
+                      className={leafClass(
+                        pathname === "/import/shipping-ids",
+                        sidebarCollapsed,
+                      )}
+                    >
+                      {!sidebarCollapsed ? (
+                        <span className="pl-1">Shipping IDs</span>
+                      ) : (
+                        <span
+                          className={`${navIconBadgeClass()} text-xs`}
+                          title="Shipping IDs"
+                        >
+                          ID
+                        </span>
+                      )}
+                    </Link>
+                  ) : null}
                   <Link
                     href="/import/revert"
                     onClick={closeMobileNav}

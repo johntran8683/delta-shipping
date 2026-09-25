@@ -58,6 +58,8 @@ If Docker Hub stays unreachable, install PostgreSQL locally, apply `schema-v1.sq
 
    Multi-role test user (PICKER + PACKER + SHIPPER, for post-login role choice): `user@example.com` / `ChangeMeUser123!` — configurable via `SEED_MULTI_ROLE_USER_*` in `apps/api/.env`.
 
+   Roles include **`CSA`** (customer profiles + courier accounts + Shipping IDs import). Assign via User management; seed ensures admin also has `CSA`.
+
 4. **Web environment**
 
    ```bash

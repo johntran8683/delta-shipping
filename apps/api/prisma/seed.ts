@@ -12,6 +12,26 @@ import {
 
 const prisma = new PrismaClient();
 
+/** Ensure CSA exists on DBs created before schema-v1 included it. */
+async function ensureCsaRole() {
+  await prisma.role.upsert({
+    where: { code: 'CSA' },
+    create: {
+      code: 'CSA',
+      name: 'CSA',
+      description: 'Customer profiles and courier account maintenance',
+      sort_order: 15,
+      is_active: true,
+    },
+    update: {
+      name: 'CSA',
+      description: 'Customer profiles and courier account maintenance',
+      sort_order: 15,
+      is_active: true,
+    },
+  });
+}
+
 async function seedPermissions() {
   for (const entry of PERMISSION_MANIFEST) {
     await prisma.permission.upsert({
@@ -59,14 +79,25 @@ async function seedAdminIfNeeded() {
   const existing = await prisma.user.findUnique({
     where: { email: email.toLowerCase() },
   });
+  const ops = await prisma.role.findMany({
+    where: {
+      code: { in: ['SUPERVISOR', 'CSA', 'PICKER', 'PACKER', 'SHIPPER'] },
+    },
+  });
+
   if (existing) {
-    console.log('Admin user seed skipped (already exists):', email);
+    for (const r of ops) {
+      await prisma.userRole.upsert({
+        where: {
+          user_id_role_id: { user_id: existing.id, role_id: r.id },
+        },
+        create: { user_id: existing.id, role_id: r.id },
+        update: {},
+      });
+    }
+    console.log('Admin user roles ensured (incl. CSA):', email);
     return;
   }
-
-  const ops = await prisma.role.findMany({
-    where: { code: { in: ['SUPERVISOR', 'PICKER', 'PACKER', 'SHIPPER'] } },
-  });
 
   await prisma.user.create({
     data: {
@@ -128,6 +159,7 @@ async function seedMultiRoleTestUserIfNeeded() {
 }
 
 async function main() {
+  await ensureCsaRole();
   await seedPermissions();
   await seedAdminIfNeeded();
   await seedMultiRoleTestUserIfNeeded();

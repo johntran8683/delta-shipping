@@ -44,9 +44,27 @@ export class ImportController {
     return this.importService.queueExcelFile(file, payload);
   }
 
+  /**
+   * Shipping IDs master file (customers + courier accounts).
+   * Multipart field name `file`. Prefers sheet named `Customers`.
+   */
+  @Post('shipping-ids')
+  @RequirePermissions('import.shipping_ids')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
+  )
+  uploadShippingIds(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @CurrentPayload() payload: JwtPayload,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Missing file (use field name "file")');
+    }
+    return this.importService.queueShippingIdsFile(file, payload);
+  }
+
   /** Recent import batches (newest first). Must be registered before `batches/:id`. */
   @Get('batches')
-  @RequirePermissions('import.daily_dn')
   listBatches(
     @Query() query: ListImportBatchesQueryDto,
     @CurrentPayload() payload: JwtPayload,
@@ -55,7 +73,6 @@ export class ImportController {
   }
 
   @Get('batches/:id')
-  @RequirePermissions('import.daily_dn')
   getBatch(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentPayload() payload: JwtPayload,
@@ -64,7 +81,6 @@ export class ImportController {
   }
 
   @Get('batches/:id/report')
-  @RequirePermissions('import.daily_dn')
   getBatchReport(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentPayload() payload: JwtPayload,

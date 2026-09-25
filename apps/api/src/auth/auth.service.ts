@@ -30,7 +30,14 @@ function findAssignedRoleByCode<T extends { code: string }>(
 function pickDefaultActiveRole<T extends { code: string }>(
   assignments: T[],
 ): T {
-  const priority = ['SUPERVISOR', 'SYSTEM', 'PICKER', 'PACKER', 'SHIPPER'];
+  const priority = [
+    'SUPERVISOR',
+    'SYSTEM',
+    'CSA',
+    'PICKER',
+    'PACKER',
+    'SHIPPER',
+  ];
   const sorted = [...assignments].sort((a, b) => {
     const ia = priority.indexOf(a.code);
     const ib = priority.indexOf(b.code);

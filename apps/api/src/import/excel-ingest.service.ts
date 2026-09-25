@@ -26,6 +26,10 @@ export type ExcelJobData = {
   filePath: string;
   actorUserId: string;
   actorRoleId: string;
+  /** Defaults to daily DN when omitted (legacy jobs). */
+  sourceType?: 'DAILY_DN' | 'SHIPPING_IDS';
+  /** Preferred sheet name for Shipping IDs (from header validation). */
+  sheetName?: string;
 };
 
 const IMPORT_DN_CREATED_CODE = 'IMPORTED_DN_CREATED';
@@ -38,6 +42,240 @@ export class ExcelIngestService {
   constructor(private readonly prisma: PrismaService) {}
 
   async ingestFromPath(job: ExcelJobData): Promise<void> {
+    if (job.sourceType === 'SHIPPING_IDS') {
+      await this.ingestShippingIdsFromPath(job);
+      return;
+    }
+    await this.ingestDailyDnFromPath(job);
+  }
+
+  async ingestShippingIdsFromPath(job: ExcelJobData): Promise<void> {
+    const { batchId, filePath } = job;
+    try {
+      const buf = await readFile(filePath);
+      const workbook = XLSX.read(buf, { type: 'buffer', cellDates: true });
+      if (!workbook.SheetNames.length) {
+        throw new Error('Workbook has no sheets');
+      }
+      const preferred =
+        job.sheetName?.trim() ||
+        workbook.SheetNames.find((n) => n.trim().toLowerCase() === 'customers');
+      const sheetName = preferred ?? workbook.SheetNames[0]!;
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) {
+        throw new Error(`Sheet "${sheetName}" not found`);
+      }
+      const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+        defval: null,
+        raw: false,
+      });
+
+      await this.prisma.importBatch.update({
+        where: { id: batchId },
+        data: { total_rows: json.length, summary_message: 'Processing…' },
+      });
+
+      let errorRows = 0;
+      let successRows = 0;
+      let customersCreated = 0;
+      let customersUpdated = 0;
+      let accountsUpserted = 0;
+
+      const carrierColumns: { labels: string[]; carrierCode: string }[] = [
+        { labels: ['UPS #', 'UPS#'], carrierCode: 'UPS' },
+        { labels: ['FED EX #', 'FED EX#', 'FEDEX #', 'FedEx #'], carrierCode: 'FEDEX' },
+        { labels: ['DHL #', 'DHL#'], carrierCode: 'DHL' },
+      ];
+
+      for (let i = 0; i < json.length; i++) {
+        const data = json[i]!;
+        const excelRow = i + 2;
+        const soldToCode = toStr(
+          pickCellExact(data, 'code', 'Sold-to', 'Sold to') ??
+            pickCell(data, 'code'),
+          30,
+        )?.toUpperCase();
+        const soldToName = toStr(
+          pickCell(
+            data,
+            'CUSTOMER NAME:',
+            'CUSTOMER NAME',
+            'Customer Name',
+            'Sold-to Name',
+            'Sold to Name',
+          ),
+          255,
+        );
+
+        if (!soldToCode) {
+          errorRows += 1;
+          await this.prisma.importRowError.create({
+            data: {
+              batch_id: batchId,
+              sheet_name: sheetName,
+              row_number: excelRow,
+              error_code: 'MISSING_SOLD_TO_CODE',
+              severity: error_severity.BLOCKER,
+              error_message: 'Missing customer code (code).',
+              raw_row_json: data as Prisma.InputJsonValue,
+            },
+          });
+          continue;
+        }
+        if (!soldToName) {
+          errorRows += 1;
+          await this.prisma.importRowError.create({
+            data: {
+              batch_id: batchId,
+              sheet_name: sheetName,
+              row_number: excelRow,
+              error_code: 'MISSING_CUSTOMER_NAME',
+              severity: error_severity.BLOCKER,
+              error_message: 'Missing customer name (CUSTOMER NAME:).',
+              raw_row_json: data as Prisma.InputJsonValue,
+            },
+          });
+          continue;
+        }
+
+        const fedId = toStr(pickCell(data, 'FED ID #', 'FED ID#', 'Fed ID #'), 50);
+        const contact = toStr(pickCell(data, 'Contact:', 'Contact'), 120);
+        const phone = toStr(pickCell(data, 'Phone #', 'Phone#', 'Phone'), 50);
+        const emailRaw = toStr(pickCell(data, 'Email:', 'Email'), 255);
+        const email = emailRaw ? emailRaw.toLowerCase() : null;
+        const shipInfo = toStr(
+          pickCell(data, 'SHIPPING INFO….', 'SHIPPING INFO....', 'SHIPPING INFO'),
+        );
+        const preference = toStr(pickCell(data, 'Customer Preference:'));
+        const shippingPreference = [shipInfo, preference]
+          .filter(Boolean)
+          .join('\n')
+          .trim() || null;
+
+        try {
+          const existing = await this.prisma.customer.findUnique({
+            where: { sold_to_code: soldToCode },
+            select: { id: true },
+          });
+
+          const customer = existing
+            ? await this.prisma.customer.update({
+                where: { id: existing.id },
+                data: {
+                  sold_to_name: soldToName,
+                  fed_id_number: fedId,
+                  default_contact_name: contact,
+                  default_phone: phone,
+                  default_email: email,
+                  shipping_preference: shippingPreference,
+                  is_active: true,
+                },
+              })
+            : await this.prisma.customer.create({
+                data: {
+                  sold_to_code: soldToCode,
+                  sold_to_name: soldToName,
+                  fed_id_number: fedId,
+                  default_contact_name: contact,
+                  default_phone: phone,
+                  default_email: email,
+                  shipping_preference: shippingPreference,
+                  is_active: true,
+                },
+              });
+
+          if (existing) customersUpdated += 1;
+          else customersCreated += 1;
+
+          for (const col of carrierColumns) {
+            const accountNumber = toStr(pickCell(data, ...col.labels), 80);
+            if (!accountNumber) continue;
+
+            const existingAcct =
+              await this.prisma.customerCarrierAccount.findFirst({
+                where: {
+                  customer_id: customer.id,
+                  carrier_code: col.carrierCode,
+                  account_number: accountNumber,
+                },
+              });
+            if (existingAcct) {
+              await this.prisma.customerCarrierAccount.update({
+                where: { id: existingAcct.id },
+                data: { is_active: true, is_collect_enabled: true },
+              });
+            } else {
+              await this.prisma.customerCarrierAccount.create({
+                data: {
+                  customer_id: customer.id,
+                  carrier_code: col.carrierCode,
+                  account_number: accountNumber,
+                  is_collect_enabled: true,
+                  is_active: true,
+                },
+              });
+            }
+            accountsUpserted += 1;
+          }
+
+          successRows += 1;
+        } catch (rowErr) {
+          errorRows += 1;
+          const message =
+            rowErr instanceof Error ? rowErr.message : 'Row ingest failed';
+          await this.prisma.importRowError.create({
+            data: {
+              batch_id: batchId,
+              sheet_name: sheetName,
+              row_number: excelRow,
+              error_code: 'ROW_INGEST_FAILED',
+              severity: error_severity.BLOCKER,
+              error_message: message.slice(0, 2000),
+              raw_row_json: data as Prisma.InputJsonValue,
+            },
+          });
+        }
+      }
+
+      let status: batch_status = batch_status.SUCCESS;
+      if (errorRows > 0 && successRows > 0) status = batch_status.PARTIAL;
+      if (errorRows > 0 && successRows === 0) status = batch_status.FAILED;
+
+      await this.prisma.importBatch.update({
+        where: { id: batchId },
+        data: {
+          status,
+          completed_at: new Date(),
+          success_rows: successRows,
+          error_rows: errorRows,
+          summary_message: [
+            `Shipping IDs: ${customersCreated} customer(s) created, ${customersUpdated} updated,`,
+            `${accountsUpserted} carrier account upsert(s).`,
+            errorRows > 0 ? `${errorRows} row error(s).` : 'No row errors.',
+          ]
+            .join(' ')
+            .slice(0, 5000),
+        },
+      });
+      this.log.log(`Shipping IDs batch ${batchId} finished: ${status}`);
+    } catch (err) {
+      this.log.error(err);
+      await this.prisma.importBatch.update({
+        where: { id: batchId },
+        data: {
+          status: batch_status.FAILED,
+          completed_at: new Date(),
+          summary_message: (
+            err instanceof Error ? err.message : 'Shipping IDs import failed'
+          ).slice(0, 5000),
+        },
+      });
+    } finally {
+      await unlink(filePath).catch(() => undefined);
+    }
+  }
+
+  async ingestDailyDnFromPath(job: ExcelJobData): Promise<void> {
     const { batchId, filePath, actorUserId, actorRoleId } = job;
     try {
       const buf = await readFile(filePath);

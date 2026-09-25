@@ -127,6 +127,7 @@ EXECUTE FUNCTION set_updated_at();
 INSERT INTO roles (code, name, description, sort_order)
 VALUES
     ('SUPERVISOR', 'Supervisor', 'Priority, hold, import, overrides', 10),
+    ('CSA', 'CSA', 'Customer profiles and courier account maintenance', 15),
     ('PICKER', 'Picker', 'Pick queue and pick completion', 20),
     ('PACKER', 'Packer', 'Pack queue and pack completion', 30),
     ('SHIPPER', 'Shipper', 'Shipment creation and shipped', 40),

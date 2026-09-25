@@ -8,7 +8,7 @@ import { ResponseModal } from "@/components/response-modal";
 import { clearSession, getAccessToken } from "@/lib/auth-storage";
 import { formatApiErrorPayload } from "@/lib/api-error";
 import { apiBase } from "@/lib/config";
-import { canUseDataImport } from "@/lib/import-access";
+import { canSeeImportNav, canUseDataImport } from "@/lib/import-access";
 
 type ImportBatchRow = {
   id: string;
@@ -46,6 +46,7 @@ function statusStyles(status: string) {
 export default function RevertImportPage() {
   const router = useRouter();
   const [batches, setBatches] = useState<ImportBatchRow[]>([]);
+  const [canUndoDailyDn, setCanUndoDailyDn] = useState(false);
   const [permHint, setPermHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,13 +104,15 @@ export default function RevertImportPage() {
         }) => {
           const role = d.activeRoleCode ?? "";
           const codes = d.permissions ?? [];
-          if (!canUseDataImport(role)) {
+          if (!canSeeImportNav(role)) {
             setPermHint(
-              "Undo import requires active role SUPERVISOR or SYSTEM.",
+              "Import history requires active role CSA, SUPERVISOR, or SYSTEM.",
             );
-          } else if (!codes.includes("import.daily_dn")) {
-            setPermHint(
-              "Your role is missing import permission (import.daily_dn).",
+            setCanUndoDailyDn(false);
+          } else {
+            setPermHint(null);
+            setCanUndoDailyDn(
+              canUseDataImport(role) && codes.includes("import.daily_dn"),
             );
           }
         },
@@ -161,8 +164,8 @@ export default function RevertImportPage() {
 
   return (
     <OperationsShell
-      title="Undo import"
-      subtitle="Remove delivery notes that still point to a batch as their last import. Batches still RUNNING must finish before they can be undone."
+      title="Past imports"
+      subtitle="Daily DN batches can be undone (removes linked DNs). Shipping IDs batches are listed for history only and do not remove customers."
     >
       <div className="space-y-5">
         {permHint && (
@@ -238,7 +241,10 @@ export default function RevertImportPage() {
                 ) : (
                   batches.map((b) => {
                     const busy = revertingId === b.id;
-                    const canRevert = b.status !== "RUNNING";
+                    const canRevert =
+                      canUndoDailyDn &&
+                      b.source_type === "DAILY_DN" &&
+                      b.status !== "RUNNING";
                     return (
                       <tr
                         key={b.id}
@@ -251,7 +257,12 @@ export default function RevertImportPage() {
                           className="max-w-[240px] truncate px-4 py-3 font-medium text-slate-900 dark:text-slate-100"
                           title={b.file_name}
                         >
-                          {b.file_name}
+                          <span className="block truncate">{b.file_name}</span>
+                          <span className="text-[11px] font-normal text-slate-500">
+                            {b.source_type === "SHIPPING_IDS"
+                              ? "Shipping IDs"
+                              : "Daily DN"}
+                          </span>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3">
                           <span
@@ -261,7 +272,9 @@ export default function RevertImportPage() {
                           </span>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-800 dark:text-slate-200">
-                          {b._count.delivery_notes}
+                          {b.source_type === "SHIPPING_IDS"
+                            ? "—"
+                            : b._count.delivery_notes}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3">
                           <Link
@@ -277,14 +290,20 @@ export default function RevertImportPage() {
                           </Link>
                         </td>
                         <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            disabled={!canRevert || busy || !!permHint}
-                            onClick={() => void revertBatch(b)}
-                            className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-800 disabled:pointer-events-none disabled:opacity-40 dark:bg-red-900 dark:hover:bg-red-800"
-                          >
-                            {busy ? "Working…" : "Undo"}
-                          </button>
+                          {b.source_type === "SHIPPING_IDS" ? (
+                            <span className="text-xs text-slate-400">
+                              No undo
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={!canRevert || busy || !!permHint}
+                              onClick={() => void revertBatch(b)}
+                              className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-800 disabled:pointer-events-none disabled:opacity-40 dark:bg-red-900 dark:hover:bg-red-800"
+                            >
+                              {busy ? "Working…" : "Undo"}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
