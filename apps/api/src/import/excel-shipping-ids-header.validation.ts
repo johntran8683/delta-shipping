@@ -63,9 +63,7 @@ export function validateShippingIdsExcelHeaders(
       defval: null,
       raw: false,
     }) as unknown[][];
-    const headerRow = (aoa[0] ?? []).map((c) =>
-      c == null ? '' : String(c),
-    );
+    const headerRow = (aoa[0] ?? []).map((c) => (c == null ? '' : String(c)));
     sheetKeys.push(...headerRow.filter(Boolean));
   }
 

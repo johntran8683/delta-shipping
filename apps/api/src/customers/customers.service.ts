@@ -191,7 +191,9 @@ export class CustomersService {
     const carrier_code = dto.carrier_code.trim().toUpperCase().slice(0, 30);
     const account_number = dto.account_number.trim().slice(0, 80);
     if (!carrier_code || !account_number) {
-      throw new ConflictException('carrier_code and account_number are required');
+      throw new ConflictException(
+        'carrier_code and account_number are required',
+      );
     }
 
     try {

@@ -153,11 +153,7 @@ export const ROLE_PERMISSION_DEFAULTS: Record<string, string[]> = {
     'users.manage',
     'permissions.manage',
   ],
-  CSA: [
-    'customers.read',
-    'customers.write',
-    'import.shipping_ids',
-  ],
+  CSA: ['customers.read', 'customers.write', 'import.shipping_ids'],
   PICKER: ['dn.read', 'dn.status.pick'],
   PACKER: ['dn.read', 'dn.status.pack'],
   SHIPPER: ['dn.read', 'shipment.create', 'customers.read'],

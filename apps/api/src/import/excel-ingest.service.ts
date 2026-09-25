@@ -83,7 +83,10 @@ export class ExcelIngestService {
 
       const carrierColumns: { labels: string[]; carrierCode: string }[] = [
         { labels: ['UPS #', 'UPS#'], carrierCode: 'UPS' },
-        { labels: ['FED EX #', 'FED EX#', 'FEDEX #', 'FedEx #'], carrierCode: 'FEDEX' },
+        {
+          labels: ['FED EX #', 'FED EX#', 'FEDEX #', 'FedEx #'],
+          carrierCode: 'FEDEX',
+        },
         { labels: ['DHL #', 'DHL#'], carrierCode: 'DHL' },
       ];
 
@@ -138,19 +141,25 @@ export class ExcelIngestService {
           continue;
         }
 
-        const fedId = toStr(pickCell(data, 'FED ID #', 'FED ID#', 'Fed ID #'), 50);
+        const fedId = toStr(
+          pickCell(data, 'FED ID #', 'FED ID#', 'Fed ID #'),
+          50,
+        );
         const contact = toStr(pickCell(data, 'Contact:', 'Contact'), 120);
         const phone = toStr(pickCell(data, 'Phone #', 'Phone#', 'Phone'), 50);
         const emailRaw = toStr(pickCell(data, 'Email:', 'Email'), 255);
         const email = emailRaw ? emailRaw.toLowerCase() : null;
         const shipInfo = toStr(
-          pickCell(data, 'SHIPPING INFO….', 'SHIPPING INFO....', 'SHIPPING INFO'),
+          pickCell(
+            data,
+            'SHIPPING INFO….',
+            'SHIPPING INFO....',
+            'SHIPPING INFO',
+          ),
         );
         const preference = toStr(pickCell(data, 'Customer Preference:'));
-        const shippingPreference = [shipInfo, preference]
-          .filter(Boolean)
-          .join('\n')
-          .trim() || null;
+        const shippingPreference =
+          [shipInfo, preference].filter(Boolean).join('\n').trim() || null;
 
         try {
           const existing = await this.prisma.customer.findUnique({
@@ -265,8 +274,9 @@ export class ExcelIngestService {
         data: {
           status: batch_status.FAILED,
           completed_at: new Date(),
-          summary_message: (
-            err instanceof Error ? err.message : 'Shipping IDs import failed'
+          summary_message: (err instanceof Error
+            ? err.message
+            : 'Shipping IDs import failed'
           ).slice(0, 5000),
         },
       });
