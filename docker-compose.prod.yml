@@ -1,0 +1,82 @@
+# Production stack for Delta Shipping.
+#
+# Usage (on the server, from the repo root):
+#   cp .env.prod.example .env
+#   # edit .env — passwords, JWT secret, server IP
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# First deploy: set RUN_SEED_ON_BOOT=1 in .env so the initial admin user is
+# created, then set it back to 0 after the first successful start.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: delta-shipping-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-delta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-delta_shipping}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Fresh databases bootstrap from the canonical v1 schema; the API
+      # entrypoint then applies any newer Prisma migrations on top.
+      - ./schema-v1.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-delta}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: delta-shipping-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: delta-shipping-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-delta}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-delta_shipping}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_EXPIRES_SEC: ${JWT_EXPIRES_SEC:-28800}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PORT: 3001
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_MULTI_ROLE_USER_EMAIL: ${SEED_MULTI_ROLE_USER_EMAIL:-}
+      SEED_MULTI_ROLE_USER_PASSWORD: ${SEED_MULTI_ROLE_USER_PASSWORD:-}
+      RUN_SEED_ON_BOOT: ${RUN_SEED_ON_BOOT:-0}
+    ports:
+      - "3001:3001"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${WEB_API_URL:-http://localhost:3001}
+    container_name: delta-shipping-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PORT: 3000
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+  redis_data:
