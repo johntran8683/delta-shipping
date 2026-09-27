@@ -5,10 +5,9 @@ import { createPortal } from "react-dom";
 import { StatusBadgeWithHover } from "@/components/status-badge-with-hover";
 import { detailStatusHoverInput } from "@/lib/dn-status-hover";
 import { RushIndicator, RushIndicatorTheme } from "@/components/rush-indicator";
-import { formatDnStatusLabel } from "@/lib/dn-status";
 
 const btnBase =
-  "inline-flex w-full items-center justify-center rounded-md px-2.5 py-1.5 text-xs font-semibold transition disabled:pointer-events-none disabled:opacity-40";
+  "inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs font-semibold transition disabled:pointer-events-none disabled:opacity-40";
 const btnGhost =
   "border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900";
 const btnPrimary =
@@ -125,27 +124,6 @@ export type SupervisorDnControlsProps = {
     boxes?: unknown[];
   }> | null;
 };
-
-function GroupPanel({
-  title,
-  children,
-  className = "",
-}: {
-  title: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={`flex flex-col rounded-md border border-slate-200/90 bg-slate-50/50 p-2 dark:border-slate-700/80 dark:bg-slate-900/30 ${className}`.trim()}
-    >
-      <p className="mb-1.5 text-[0.6rem] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-500">
-        {title}
-      </p>
-      <div className="flex flex-col gap-1.5">{children}</div>
-    </div>
-  );
-}
 
 function SupervisorModal({
   open,
@@ -361,172 +339,133 @@ export function SupervisorDnControls({
           ? "Active in the operational queue."
           : "Closed — limited workflow actions.";
 
-  const gridCols =
-    hasWorkflowPanel && hasQueuePanel && hasPrintPanel
-      ? "sm:grid-cols-3"
-      : hasWorkflowPanel && (hasQueuePanel || hasPrintPanel)
-        ? "sm:grid-cols-2"
-        : "sm:grid-cols-1";
-
   return (
     <section
-      className={`print:hidden rounded-lg border border-slate-200/90 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/70 ${
+      className={`print:hidden flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/70 ${
         busy ? "pointer-events-none opacity-60" : ""
       }`}
       aria-label="Supervisor controls"
       aria-busy={busy}
     >
-      <div className="border-b border-slate-200/90 px-3 py-2.5 dark:border-slate-800 sm:px-4">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-[0.6rem] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-500">
-            Supervisor
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        <StatusBadgeWithHover
+          status={currentStatus}
+          isOpen={isOpen}
+          hoverInput={detailStatusHoverInput({
+            status_history: statusHistory,
+            completed_pack_sessions: completedPackSessions,
+          })}
+        />
+        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          {isOpen ? "Open" : "Closed"}
+        </span>
+        {currentPriorityNo != null ? (
+          <span className="font-mono text-[11px] font-medium text-slate-600 dark:text-slate-300">
+            P{currentPriorityNo}
           </span>
-          <span className="hidden text-slate-300 sm:inline dark:text-slate-600" aria-hidden>
-            ·
-          </span>
-          <StatusBadgeWithHover
-            status={currentStatus}
-            isOpen={isOpen}
-            hoverInput={detailStatusHoverInput({
-              status_history: statusHistory,
-              completed_pack_sessions: completedPackSessions,
-            })}
-          />
-          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-            {isOpen ? "Open" : "Closed"}
-          </span>
-          {currentPriorityNo != null ? (
-            <span className="font-mono text-[10px] font-medium text-slate-600 dark:text-slate-300">
-              P{currentPriorityNo}
-            </span>
-          ) : null}
-        </div>
-        <p className="mt-1 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-          {formatDnStatusLabel(currentStatus)}
-          <span className="mx-1 text-slate-300 dark:text-slate-600">·</span>
+        ) : null}
+        {isRushed ? (
+          <RushIndicatorTheme>
+            <RushIndicator variant="chip" rushReason={storedRushReason} />
+          </RushIndicatorTheme>
+        ) : null}
+        <span className="hidden text-[11px] text-slate-500 sm:inline dark:text-slate-400">
           {workflowHint}
-        </p>
+        </span>
       </div>
 
       {hasAnyActions ? (
-        <div className="px-3 py-2.5 sm:px-4">
-          <div className={`grid gap-2 ${gridCols}`}>
-            {hasQueuePanel ? (
-              <GroupPanel title="Queue">
-                {isRushed ? (
-                  <div className="flex flex-col gap-1 rounded-md border border-dashed border-red-200/80 bg-white/80 px-2 py-1.5 dark:border-red-900/40 dark:bg-slate-950/50">
-                    <RushIndicatorTheme>
-                      <RushIndicator
-                        variant="chip"
-                        rushReason={storedRushReason}
-                      />
-                    </RushIndicatorTheme>
-                    {canClearRush ? (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => openRush(false)}
-                        className="text-left text-[11px] font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 transition hover:text-slate-900 dark:text-slate-400 dark:decoration-slate-600 dark:hover:text-slate-200"
-                      >
-                        Clear rush…
-                      </button>
-                    ) : null}
-                  </div>
-                ) : canMarkRush ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => openRush(true)}
-                    className={`${btnBase} ${btnGhost}`}
-                  >
-                    Mark rush
-                  </button>
-                ) : null}
-                {canSetPriority ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setPriorityOpen(true)}
-                    className={`${btnBase} ${btnGhost}`}
-                  >
-                    Change priority
-                    {currentPriorityNo != null ? (
-                      <span className="ml-1 font-mono font-normal text-slate-500 dark:text-slate-400">
-                        (P{currentPriorityNo})
-                      </span>
-                    ) : null}
-                  </button>
-                ) : null}
-              </GroupPanel>
-            ) : null}
-
-            {hasPrintPanel ? (
-              <GroupPanel title="Labels">
-                <div className="flex flex-col gap-1.5">
-                  {onPrintShippingLabel ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={onPrintShippingLabel}
-                      className={`${btnBase} ${btnGhost}`}
-                    >
-                      Shipping label
-                    </button>
-                  ) : null}
-                  {onPrintPoLabel ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={onPrintPoLabel}
-                      className={`${btnBase} ${btnGhost}`}
-                    >
-                      PO label
-                    </button>
-                  ) : null}
-                </div>
-              </GroupPanel>
-            ) : null}
-
-            {hasWorkflowPanel ? (
-              <GroupPanel title="Workflow">
-                {primaryWorkflow ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => openStatus(primaryWorkflow)}
-                    className={`${btnBase} ${btnPrimary}`}
-                  >
-                    {STATUS_ACTION[primaryWorkflow].label}
-                  </button>
-                ) : null}
-                {secondaryWorkflow.map((target) => (
-                  <button
-                    key={target}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => openStatus(target)}
-                    className={`${btnBase} ${btnGhost}`}
-                  >
-                    {STATUS_ACTION[target].label}
-                  </button>
-                ))}
-                {canCancel ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => openStatus("CANCELLED")}
-                    className={`${btnBase} ${btnDanger}`}
-                  >
-                    {STATUS_ACTION.CANCELLED.label}
-                  </button>
-                ) : null}
-              </GroupPanel>
-            ) : null}
-          </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {canMarkRush && !isRushed ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => openRush(true)}
+              className={`${btnBase} ${btnGhost}`}
+            >
+              Mark rush
+            </button>
+          ) : null}
+          {isRushed && canClearRush ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => openRush(false)}
+              className={`${btnBase} ${btnGhost}`}
+            >
+              Clear rush
+            </button>
+          ) : null}
+          {canSetPriority ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setPriorityOpen(true)}
+              className={`${btnBase} ${btnGhost}`}
+            >
+              Priority
+              {currentPriorityNo != null ? (
+                <span className="ml-1 font-mono font-normal text-slate-500 dark:text-slate-400">
+                  P{currentPriorityNo}
+                </span>
+              ) : null}
+            </button>
+          ) : null}
+          {onPrintShippingLabel ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onPrintShippingLabel}
+              className={`${btnBase} ${btnGhost}`}
+            >
+              Shipping label
+            </button>
+          ) : null}
+          {onPrintPoLabel ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onPrintPoLabel}
+              className={`${btnBase} ${btnGhost}`}
+            >
+              PO label
+            </button>
+          ) : null}
+          {primaryWorkflow ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => openStatus(primaryWorkflow)}
+              className={`${btnBase} ${btnPrimary}`}
+            >
+              {STATUS_ACTION[primaryWorkflow].shortLabel}
+            </button>
+          ) : null}
+          {secondaryWorkflow.map((target) => (
+            <button
+              key={target}
+              type="button"
+              disabled={busy}
+              onClick={() => openStatus(target)}
+              className={`${btnBase} ${btnGhost}`}
+            >
+              {STATUS_ACTION[target].shortLabel}
+            </button>
+          ))}
+          {canCancel ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => openStatus("CANCELLED")}
+              className={`${btnBase} ${btnDanger}`}
+            >
+              {STATUS_ACTION.CANCELLED.shortLabel}
+            </button>
+          ) : null}
         </div>
       ) : (
-        <p className="px-3 py-4 text-center text-sm text-slate-500 sm:px-4 dark:text-slate-400">
-          No supervisor actions are available for this delivery note.
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          No actions for this note.
         </p>
       )}
 

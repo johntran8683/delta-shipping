@@ -588,16 +588,34 @@ function formatDate(value: string | null) {
   });
 }
 
-function addrLine(value: string | null | undefined): string {
-  const t = value?.trim();
-  return t ? t : "—";
-}
-
 function countryDisplay(loc: ShipToLocationDetail): string {
   const name = loc.country_name?.trim();
   const code = loc.country_code?.trim();
   if (name && code) return `${name} (${code})`;
   return name || code || "—";
+}
+
+/** Compact postal block: name, streets, city/region/postal, country. Empty parts omitted. */
+function shipToBlockLines(
+  loc: ShipToLocationDetail | null,
+  fallbackName: string,
+  fallbackRegion: string | null,
+): string[] {
+  if (!loc) {
+    return [fallbackName.trim(), fallbackRegion?.trim() ?? ""].filter(Boolean);
+  }
+  const locality = [loc.city, loc.state_region ?? fallbackRegion, loc.postal_code]
+    .map((s) => s?.trim())
+    .filter(Boolean)
+    .join(", ");
+  const country = countryDisplay(loc);
+  return [
+    loc.ship_to_name?.trim(),
+    loc.street1?.trim(),
+    loc.street2?.trim(),
+    locality,
+    country !== "—" ? country : "",
+  ].filter((s): s is string => Boolean(s));
 }
 
 function canPrintDnLabels(): boolean {
@@ -1788,31 +1806,35 @@ export default function DeliveryNoteDetailPage() {
       }
       subtitle={
         detail ? (
-          supervisorView ? (
-            <span className="text-sm text-slate-500 dark:text-slate-400">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600 dark:text-slate-300">
+            <span className="truncate font-medium text-slate-800 dark:text-slate-100">
+              {detail.sold_to_name}
+            </span>
+            <span className="text-slate-300 dark:text-slate-600" aria-hidden>
+              ·
+            </span>
+            <span className="tabular-nums text-slate-500 dark:text-slate-400">
               {detail.lines.length} line
               {detail.lines.length === 1 ? "" : "s"}
             </span>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <StatusBadgeWithHover
-                status={detail.current_status}
-                isOpen={detail.is_open}
-                hoverInput={detailStatusHoverInput({
-                  status_history: detail.status_history,
-                  completed_pack_sessions: detail.completed_pack_sessions,
-                })}
-              />
-              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium tabular-nums text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                {detail.is_open ? "Open" : "Closed"}
-              </span>
-              {detail.current_priority_no != null ? (
-                <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                  Priority {detail.current_priority_no}
-                </span>
-              ) : null}
-            </div>
-          )
+            {!supervisorView ? (
+              <>
+                <StatusBadgeWithHover
+                  status={detail.current_status}
+                  isOpen={detail.is_open}
+                  hoverInput={detailStatusHoverInput({
+                    status_history: detail.status_history,
+                    completed_pack_sessions: detail.completed_pack_sessions,
+                  })}
+                />
+                {detail.current_priority_no != null ? (
+                  <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                    P{detail.current_priority_no}
+                  </span>
+                ) : null}
+              </>
+            ) : null}
+          </div>
         ) : (
           <span className="text-sm text-slate-500">Loading record…</span>
         )
@@ -1820,10 +1842,10 @@ export default function DeliveryNoteDetailPage() {
       headerActions={shipperHeaderPrintActions}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-2 sm:gap-2.5">
-        <nav className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200/80 pb-2 dark:border-slate-800/80">
+        <nav className="shrink-0">
           <Link
             href="/delivery-notes"
-            className="group inline-flex w-fit items-center gap-1.5 text-xs font-medium text-slate-600 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+            className="group inline-flex w-fit items-center gap-1 text-xs font-medium text-slate-500 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
           >
             <span
               className="text-slate-400 transition group-hover:-translate-x-0.5 dark:text-slate-500"
@@ -1831,14 +1853,8 @@ export default function DeliveryNoteDetailPage() {
             >
               ←
             </span>
-            Delivery notes
+            All notes
           </Link>
-          {detail && !supervisorView ? (
-            <p className="shrink-0 text-[11px] text-slate-500 dark:text-slate-500">
-              {detail.lines.length} line
-              {detail.lines.length === 1 ? "" : "s"}
-            </p>
-          ) : null}
         </nav>
 
         {detail && supervisorView ? (
@@ -2005,11 +2021,11 @@ export default function DeliveryNoteDetailPage() {
                     : ""
                 }`}
               >
-                <article className="box-border flex min-h-0 w-full max-w-full flex-col border-2 border-slate-900 bg-white text-sm text-slate-900 shadow-[2px_2px_0_rgba(15,23,42,0.06)] print:min-h-[297mm] print:w-[210mm] print:text-[12px] print:shadow-none dark:border-slate-500 dark:bg-slate-950 dark:text-slate-100 dark:shadow-none">
+                <article className="box-border flex min-h-0 w-full max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-sm text-slate-900 shadow-sm print:min-h-[297mm] print:w-[210mm] print:rounded-none print:border-slate-900 print:text-[12px] print:shadow-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
                   {!isShipperActiveRole() &&
                   !isPickerActiveRole() &&
                   !supervisorView ? (
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-slate-900 bg-slate-50 px-4 py-3 print:hidden dark:border-slate-500 dark:bg-slate-900/80">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-2.5 print:hidden dark:border-slate-700 dark:bg-slate-900/60">
                     <span className="text-[0.65rem] font-bold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-400">
                       Print
                     </span>
@@ -2041,153 +2057,81 @@ export default function DeliveryNoteDetailPage() {
                   </div>
                   ) : null}
 
-                <header className="flex shrink-0 flex-col gap-1.5 border-b-2 border-slate-900 px-[10mm] py-3 sm:flex-row sm:items-center sm:justify-between print:py-3 dark:border-slate-500">
-                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className="shrink-0 text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                <header className="flex shrink-0 flex-col gap-1 border-b border-slate-200 px-5 py-3.5 sm:flex-row sm:items-end sm:justify-between print:border-slate-900 print:px-[10mm] dark:border-slate-700">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
                       Delivery note
-                    </span>
+                    </p>
                     <DeliveryNoteNumber
                       dnNumber={detail.dn_number}
                       isRushed={detail.is_rushed}
                       rushReason={detail.latest_rush_reason}
-                      numberClassName="font-mono text-base font-semibold tabular-nums tracking-tight text-slate-900 sm:text-lg print:text-[13pt] dark:text-slate-50"
+                      numberClassName="font-mono text-lg font-semibold tabular-nums tracking-tight text-slate-900 print:text-[13pt] dark:text-slate-50"
                     />
                   </div>
-                  <div className="max-w-[16rem] text-right sm:max-w-xs sm:text-left">
-                    <p className="text-[0.6rem] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
-                      Ship method
-                    </p>
-                    <p className="mt-0.5 text-sm font-medium leading-snug text-slate-900 dark:text-slate-50">
-                      {detail.shipping_type?.trim() || "—"}
-                    </p>
-                  </div>
+                  <p className="text-sm text-slate-700 dark:text-slate-200">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+                      Via{" "}
+                    </span>
+                    {detail.shipping_type?.trim() || "—"}
+                  </p>
                 </header>
 
-                <div className="grid shrink-0 border-b-2 border-slate-900 sm:grid-cols-2 dark:border-slate-500">
-                  <section className="border-b-2 border-slate-900 px-[10mm] py-4 sm:border-b-0 sm:border-r-2 sm:py-5 dark:border-slate-500">
-                    <h2 className="border-b border-slate-300 pb-1 text-[0.65rem] font-bold uppercase tracking-[0.12em] text-slate-600 dark:border-slate-600 dark:text-slate-400">
-                      Sold to / Customer
+                <div className="grid shrink-0 border-b border-slate-200 sm:grid-cols-2 sm:divide-x sm:divide-slate-200 print:border-slate-900 dark:border-slate-700 dark:sm:divide-slate-700">
+                  <section className="border-b border-slate-200 px-5 py-3.5 sm:border-b-0 print:border-slate-900 print:px-[10mm] dark:border-slate-700">
+                    <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+                      Customer
                     </h2>
-                    <p className="mt-2 text-sm font-semibold leading-snug">
+                    <p className="mt-1.5 text-sm font-semibold leading-snug">
                       {detail.sold_to_name}
                     </p>
-                    <p className="mt-0.5 font-mono text-xs text-slate-600 dark:text-slate-400">
-                      Code {detail.sold_to_code}
+                    <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                      {detail.sold_to_code}
                     </p>
-                    <dl className="mt-2.5 space-y-2 border-t border-slate-200 pt-2.5 text-sm leading-snug dark:border-slate-600">
-                      <div>
-                        <dt className="text-[0.6rem] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                          P/O date
-                        </dt>
-                        <dd className="mt-0.5 tabular-nums">
-                          {formatDate(detail.po_date)}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[0.6rem] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                          Customer P.O.
-                        </dt>
-                        <dd className="mt-0.5 font-mono text-xs sm:text-sm">
-                          {detail.customer_po ?? "—"}
-                        </dd>
-                      </div>
-                    </dl>
+                    <p className="mt-2 text-xs leading-snug text-slate-600 dark:text-slate-300">
+                      PO {detail.customer_po?.trim() || "—"}
+                      <span className="text-slate-300 dark:text-slate-600"> · </span>
+                      {formatDate(detail.po_date)}
+                    </p>
                   </section>
-                  <section className="px-[10mm] py-4 sm:py-5">
-                    <h2 className="border-b border-slate-300 pb-1 text-[0.65rem] font-bold uppercase tracking-[0.12em] text-slate-600 dark:border-slate-600 dark:text-slate-400">
-                      Ship to — full address
+                  <section className="px-5 py-3.5 print:px-[10mm]">
+                    <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
+                      Ship to
+                      <span className="ml-2 font-mono font-medium normal-case tracking-normal text-slate-500 dark:text-slate-400">
+                        {detail.ship_to_code}
+                      </span>
                     </h2>
-                    <p className="mt-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                      Ship-to code {detail.ship_to_code}
-                    </p>
-                    {detail.ship_to_location ? (
-                      <dl className="mt-2 space-y-2 text-sm leading-snug">
-                        <div>
-                          <dt className="text-[0.6rem] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            Location / care-of name
-                          </dt>
-                          <dd className="mt-0.5 font-medium">
-                            {addrLine(detail.ship_to_location.ship_to_name)}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-[0.6rem] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            Building / suite / floor
-                          </dt>
-                          <dd className="mt-0.5">{addrLine(detail.ship_to_location.street2)}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-[0.6rem] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            Street no. & street
-                          </dt>
-                          <dd className="mt-0.5">{addrLine(detail.ship_to_location.street1)}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-[0.6rem] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            City
-                          </dt>
-                          <dd className="mt-0.5">{addrLine(detail.ship_to_location.city)}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-[0.6rem] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            State / province
-                          </dt>
-                          <dd className="mt-0.5">
-                            {addrLine(
-                              detail.ship_to_location.state_region ??
-                                detail.ship_to_region_state,
-                            )}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-[0.6rem] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            Postal code
-                          </dt>
-                          <dd className="mt-0.5 font-mono text-[13px]">
-                            {addrLine(detail.ship_to_location.postal_code)}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-[0.6rem] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                            Country
-                          </dt>
-                          <dd className="mt-0.5">{countryDisplay(detail.ship_to_location)}</dd>
-                        </div>
-                      </dl>
-                    ) : (
-                      <div className="mt-2 space-y-1.5 text-sm">
-                        <p className="font-semibold leading-snug">{detail.ship_to_name}</p>
-                        {detail.ship_to_region_state ? (
-                          <p className="text-slate-600 dark:text-slate-400">
-                            State / region (from order): {detail.ship_to_region_state}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-slate-500 dark:text-slate-400">
-                            No structured ship-to address on file; showing name and code only.
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    <address className="mt-1.5 space-y-0.5 text-sm not-italic leading-snug">
+                      {shipToBlockLines(
+                        detail.ship_to_location ?? null,
+                        detail.ship_to_name,
+                        detail.ship_to_region_state,
+                      ).map((line, i) => (
+                        <p
+                          key={`${i}-${line}`}
+                          className={
+                            i === 0
+                              ? "font-medium"
+                              : "text-slate-700 dark:text-slate-300"
+                          }
+                        >
+                          {line}
+                        </p>
+                      ))}
+                    </address>
                   </section>
                 </div>
 
-                <div className="shrink-0 border-b-2 border-slate-900 px-[10mm] py-2 dark:border-slate-500">
-                  <h2 className="text-[0.65rem] font-bold uppercase tracking-[0.12em] text-slate-600 dark:text-slate-400">
-                    Goods — line detail
-                  </h2>
-                </div>
                 <div className="min-h-0 flex-1 overflow-x-auto">
                   <table className="w-full border-collapse text-left text-sm leading-snug print:text-[12px]">
                     <thead>
-                      <tr className="border-b border-slate-900 bg-slate-100 text-[0.6rem] font-bold uppercase tracking-wide text-slate-700 dark:border-slate-500 dark:bg-slate-900 dark:text-slate-300">
-                        <th className="border-r border-slate-900 px-2 py-2 pl-[10mm] font-semibold dark:border-slate-500">
+                      <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 print:border-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400">
+                        <th className="w-16 px-5 py-2 font-semibold print:pl-[10mm]">
                           Item
                         </th>
-                        <th className="border-r border-slate-900 px-2 py-2 font-semibold dark:border-slate-500">
-                          Material
-                        </th>
-                        <th className="px-2 py-2 pr-[10mm] text-right font-semibold">
-                          Shipped qty
+                        <th className="px-2 py-2 font-semibold">Material</th>
+                        <th className="w-24 px-5 py-2 text-right font-semibold print:pr-[10mm]">
+                          Qty
                         </th>
                       </tr>
                     </thead>
@@ -2196,31 +2140,31 @@ export default function DeliveryNoteDetailPage() {
                         <tr>
                           <td
                             colSpan={3}
-                            className="border-t border-slate-200 px-[10mm] py-8 text-center text-slate-500 dark:border-slate-700"
+                            className="px-5 py-8 text-center text-slate-500"
                           >
-                            No lines on this delivery note.
+                            No lines.
                           </td>
                         </tr>
                       ) : (
                         detail.lines.map((l) => (
                           <tr
                             key={l.id}
-                            className="border-b border-slate-200 align-top dark:border-slate-700"
+                            className="border-b border-slate-100 align-top last:border-0 dark:border-slate-800"
                           >
-                            <td className="border-r border-slate-200 px-2 py-2 pl-[10mm] font-mono tabular-nums text-slate-700 dark:border-slate-700 dark:text-slate-300">
+                            <td className="px-5 py-2 font-mono text-xs tabular-nums text-slate-500 print:pl-[10mm] dark:text-slate-400">
                               {l.doc_item}
                             </td>
-                            <td className="max-w-md border-r border-slate-200 px-2 py-2 sm:max-w-xl dark:border-slate-700">
-                              <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                            <td className="px-2 py-2">
+                              <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
                                 {l.material_code ?? "—"}
                               </span>
                               {l.material_description ? (
-                                <span className="mt-0.5 block text-slate-800 dark:text-slate-200">
+                                <span className="mt-0.5 block text-slate-800 dark:text-slate-100">
                                   {l.material_description}
                                 </span>
                               ) : null}
                             </td>
-                            <td className="px-2 py-2 pr-[10mm] text-right tabular-nums">
+                            <td className="px-5 py-2 text-right tabular-nums print:pr-[10mm]">
                               {l.shipped_qty ?? "—"}
                             </td>
                           </tr>
@@ -2229,10 +2173,6 @@ export default function DeliveryNoteDetailPage() {
                     </tbody>
                   </table>
                 </div>
-
-                <footer className="mt-auto border-t-2 border-dashed border-slate-400 px-[10mm] py-3 text-center text-[0.6rem] uppercase tracking-widest text-slate-500 dark:border-slate-600 dark:text-slate-500">
-                  End of delivery note
-                </footer>
               </article>
               </div>
             </div>

@@ -23,7 +23,7 @@ import {
 import { apiBase } from "@/lib/config";
 import { DeliveryNoteNumber } from "@/components/delivery-note-number";
 import { formatDeliveryNoteNumber } from "@/lib/format-dn-number";
-import { DN_STATUS_OPTIONS } from "@/lib/dn-status";
+import { DN_STATUS_OPTIONS, formatDnStatusLabel } from "@/lib/dn-status";
 import {
   COLUMN_LABELS,
   DEFAULT_VISIBLE_COLUMNS,
@@ -107,10 +107,11 @@ function formatDate(value: string | null) {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
+  const sameYear = d.getFullYear() === new Date().getFullYear();
   return d.toLocaleDateString(undefined, {
-    year: "numeric",
     month: "short",
     day: "numeric",
+    ...(sameYear ? {} : { year: "2-digit" }),
   });
 }
 
@@ -766,90 +767,47 @@ function DeliveryNotesContent() {
     );
   }
 
+  const fieldClass =
+    "h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900/15 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500";
+
   return (
     <OperationsShell title="Delivery notes">
       <div className="space-y-2">
         <section
           aria-label="Today's delivery note statistics"
-          className="rounded-xl border border-slate-200/90 bg-white px-3 py-3 shadow-sm ring-1 ring-slate-950/[0.03] dark:border-slate-800 dark:bg-slate-950/80 dark:ring-white/[0.04] sm:px-4 sm:py-4"
+          className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/80"
         >
-            <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  Today&apos;s overview
-                </h2>
-                <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  {dailyStats
-                    ? `${dailyStats.date} · Vancouver (PT)`
-                    : "Vancouver (PT)"}
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={dailyStatsLoading}
-                onClick={() => void loadDailyStats()}
-                className="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                {dailyStatsLoading ? "Refreshing…" : "Refresh"}
-              </button>
-            </div>
-            <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-              <div
-                className="rounded-lg border border-amber-200/90 bg-amber-50/70 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/25"
-                title="Open, not shipped / cancelled / on hold"
-              >
-                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Due today
+          <h2 className="sr-only">Today</h2>
+          <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            {(
+              [
+                ["Due", dailyStats?.due_today, "Open notes due today"],
+                ["Picked", dailyStats?.picked_total, "Open notes in Picked"],
+                ["Packed", dailyStats?.packed_total, "Open notes in Packed"],
+                ["Shipped", dailyStats?.shipped_today, "Marked shipped today"],
+              ] as const
+            ).map(([label, value, title]) => (
+              <div key={label} className="flex items-baseline gap-1.5" title={title}>
+                <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                  {label}
                 </dt>
-                <dd className="mt-1 font-mono text-2xl font-semibold tabular-nums tracking-tight text-amber-950 dark:text-amber-50">
-                  {dailyStatsLoading && dailyStats == null
-                    ? "…"
-                    : (dailyStats?.due_today ?? "—")}
+                <dd className="font-mono text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-50">
+                  {dailyStatsLoading && dailyStats == null ? "…" : (value ?? "—")}
                 </dd>
               </div>
-
-              <div
-                className="rounded-lg border border-slate-200/90 bg-slate-50/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40"
-                title="Open delivery notes currently in PICKED"
-              >
-                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  In picked
-                </dt>
-                <dd className="mt-1 font-mono text-2xl font-semibold tabular-nums tracking-tight text-slate-900 dark:text-slate-50">
-                  {dailyStatsLoading && dailyStats == null
-                    ? "…"
-                    : (dailyStats?.picked_total ?? "—")}
-                </dd>
-              </div>
-
-              <div
-                className="rounded-lg border border-slate-200/90 bg-slate-50/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40"
-                title="Open delivery notes currently in PACKED"
-              >
-                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  In packed
-                </dt>
-                <dd className="mt-1 font-mono text-2xl font-semibold tabular-nums tracking-tight text-slate-900 dark:text-slate-50">
-                  {dailyStatsLoading && dailyStats == null
-                    ? "…"
-                    : (dailyStats?.packed_total ?? "—")}
-                </dd>
-              </div>
-
-              <div
-                className="rounded-lg border border-emerald-200/90 bg-emerald-50/70 px-3 py-2.5 dark:border-emerald-900/50 dark:bg-emerald-950/25"
-                title="Marked shipped today (per delivery note)"
-              >
-                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Shipped today
-                </dt>
-                <dd className="mt-1 font-mono text-2xl font-semibold tabular-nums tracking-tight text-emerald-950 dark:text-emerald-50">
-                  {dailyStatsLoading && dailyStats == null
-                    ? "…"
-                    : (dailyStats?.shipped_today ?? "—")}
-                </dd>
-              </div>
-            </dl>
+            ))}
+          </dl>
+          <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-400">
+            <span className="tabular-nums">{dailyStats?.date ?? "PT"}</span>
+            <button
+              type="button"
+              disabled={dailyStatsLoading}
+              onClick={() => void loadDailyStats()}
+              className="font-medium text-slate-500 hover:text-slate-800 disabled:opacity-50 dark:hover:text-slate-200"
+            >
+              {dailyStatsLoading ? "…" : "Refresh"}
+            </button>
+          </div>
         </section>
 
         {importBanner && (
@@ -875,194 +833,111 @@ function DeliveryNotesContent() {
           </div>
         )}
 
-        <div className="rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/80">
-          <form
-            className="space-y-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void applyFilters();
-            }}
+        <form
+          className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white px-2 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/80"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void applyFilters();
+          }}
+        >
+          <label htmlFor="filter-dn-number" className="sr-only">
+            DN #
+          </label>
+          <input
+            id="filter-dn-number"
+            type="search"
+            autoComplete="off"
+            value={dnNumberFilter}
+            onChange={(e) => setDnNumberFilter(e.target.value)}
+            placeholder="DN #"
+            title="Partial match on delivery note number"
+            className={`${fieldClass} w-28`}
+          />
+          <label htmlFor="filter-customer" className="sr-only">
+            Customer
+          </label>
+          <input
+            id="filter-customer"
+            type="search"
+            autoComplete="off"
+            value={customerFilter}
+            onChange={(e) => setCustomerFilter(e.target.value)}
+            placeholder="Customer"
+            title="Partial match on customer name or sold-to code"
+            className={`${fieldClass} w-40`}
+          />
+          <label htmlFor="filter-ship-to" className="sr-only">
+            Ship-to
+          </label>
+          <input
+            id="filter-ship-to"
+            type="search"
+            autoComplete="off"
+            value={shipToFilter}
+            onChange={(e) => setShipToFilter(e.target.value)}
+            placeholder="Ship-to"
+            title="Partial match on ship-to code or address fields"
+            className={`${fieldClass} min-w-[8rem] flex-1`}
+          />
+          <label htmlFor="filter-open" className="sr-only">
+            Open
+          </label>
+          <select
+            id="filter-open"
+            value={openFilter}
+            onChange={(e) =>
+              setOpenFilter(e.target.value as "open" | "closed")
+            }
+            className={`${fieldClass} w-[5.5rem]`}
           >
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <div className="min-w-0">
-                <label
-                  htmlFor="filter-dn-number"
-                  className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400"
-                >
-                  DN #
-                </label>
-                <input
-                  id="filter-dn-number"
-                  type="search"
-                  autoComplete="off"
-                  value={dnNumberFilter}
-                  onChange={(e) => setDnNumberFilter(e.target.value)}
-                  placeholder="Contains…"
-                  title="Partial match on delivery note number"
-                  className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900/15 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-white/10"
-                />
-              </div>
-              <div className="min-w-0">
-                <label
-                  htmlFor="filter-customer"
-                  className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400"
-                >
-                  Customer
-                </label>
-                <input
-                  id="filter-customer"
-                  type="search"
-                  autoComplete="off"
-                  value={customerFilter}
-                  onChange={(e) => setCustomerFilter(e.target.value)}
-                  placeholder="Name or code…"
-                  title="Partial match on customer name or sold-to code"
-                  className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900/15 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-white/10"
-                />
-              </div>
-              <div className="min-w-0">
-                <label
-                  htmlFor="filter-ship-to"
-                  className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400"
-                >
-                  Ship-to
-                </label>
-                <input
-                  id="filter-ship-to"
-                  type="search"
-                  autoComplete="off"
-                  value={shipToFilter}
-                  onChange={(e) => setShipToFilter(e.target.value)}
-                  placeholder="Code or address…"
-                  title="Partial match on ship-to code or address fields"
-                  className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900/15 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-white/10"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2 border-t border-slate-100 pt-2 dark:border-slate-800/80 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
-              <div className="flex flex-wrap items-end gap-2">
-                <div>
-                  <label
-                    htmlFor="filter-open"
-                    className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400"
-                  >
-                    Open
-                  </label>
-                  <select
-                    id="filter-open"
-                    value={openFilter}
-                    onChange={(e) =>
-                      setOpenFilter(e.target.value as "open" | "closed")
-                    }
-                    className="h-8 min-w-[7.5rem] rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900/15 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                  >
-                    <option value="open">Open</option>
-                    <option value="closed">Closed</option>
-                  </select>
-                </div>
-                <div className="min-w-0 sm:min-w-[10rem] sm:flex-1 sm:max-w-xs">
-                  <label
-                    htmlFor="filter-status"
-                    className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400"
-                  >
-                    Status
-                  </label>
-                  <select
-                    id="filter-status"
-                    value={statusFilter}
-                    disabled={loading || myPickingOnly}
-                    title={
-                      myPickingOnly
-                        ? "Turn off My picking to filter by status"
-                        : undefined
-                    }
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="h-8 w-full min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-white/10"
-                  >
-                    <option value="">Any</option>
-                    {DN_STATUS_OPTIONS.map((s) => (
-                      <option key={s} value={s}>
-                        {s === "SHIPPED" ? "Shipped (today)" : s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              {statusFilter.trim().toUpperCase() === "SHIPPED" ? (
-                <p className="text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-                  Shipped shows delivery notes marked shipped today (Vancouver time),
-                  including open and closed.
-                </p>
-              ) : null}
-              <div className="flex shrink-0 gap-1.5 sm:ml-auto">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  title="Apply queue and text filters (Enter in a search field also applies)"
-                  className="inline-flex h-8 items-center rounded-md bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-                >
-                  {loading ? "…" : "Apply"}
-                </button>
-                <button
-                  type="button"
-                  disabled={loading || !hasActiveFilters}
-                  title="Reset all filters and refresh"
-                  onClick={() => void clearFiltersAndRefresh()}
-                  className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
-          </form>
-
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-slate-100 pt-2 text-[11px] text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
-            <div className="flex items-center gap-1.5">
-              <label htmlFor="rows-per-page" className="shrink-0 font-medium text-slate-600 dark:text-slate-300">
-                Rows
-              </label>
-              <input
-                id="rows-per-page"
-                type="number"
-                min={1}
-                max={200}
-                value={draftPageSize}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value, 10);
-                  if (!Number.isNaN(v)) {
-                    setDraftPageSize(Math.min(200, Math.max(1, v)));
-                  }
-                }}
-                onBlur={(e) => {
-                  const parsed = parseInt(e.target.value, 10);
-                  const n = Math.min(
-                    200,
-                    Math.max(1, Number.isFinite(parsed) ? parsed : pageSize),
-                  );
-                  setDraftPageSize(n);
-                  if (n !== pageSize) {
-                    void applyPageSizeChange(n);
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    (e.target as HTMLInputElement).blur();
-                  }
-                }}
-                title="Leave field or press Enter to apply page size"
-                className="h-7 w-12 rounded border border-slate-200 bg-white px-1 text-center text-xs tabular-nums text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900/15 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-              />
-            </div>
-            <Link
-              href="/settings/delivery-notes"
-              className="font-medium text-sky-700 underline decoration-sky-300/80 underline-offset-2 hover:text-sky-900 dark:text-sky-400 dark:hover:text-sky-200"
-            >
-              Column layout…
-            </Link>
-          </div>
-        </div>
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+          </select>
+          <label htmlFor="filter-status" className="sr-only">
+            Status
+          </label>
+          <select
+            id="filter-status"
+            value={statusFilter}
+            disabled={loading || myPickingOnly}
+            title={
+              myPickingOnly
+                ? "Turn off My picking to filter by status"
+                : "Status"
+            }
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className={`${fieldClass} w-36 disabled:cursor-not-allowed disabled:opacity-50`}
+          >
+            <option value="">Any status</option>
+            {DN_STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {s === "SHIPPED" ? "Shipped today" : formatDnStatusLabel(s)}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            disabled={loading}
+            title="Apply filters"
+            className="inline-flex h-8 items-center rounded-md bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+          >
+            {loading ? "…" : "Apply"}
+          </button>
+          <button
+            type="button"
+            disabled={loading || !hasActiveFilters}
+            title="Reset all filters and refresh"
+            onClick={() => void clearFiltersAndRefresh()}
+            className="inline-flex h-8 items-center rounded-md px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:pointer-events-none disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            Clear
+          </button>
+          {statusFilter.trim().toUpperCase() === "SHIPPED" ? (
+            <p className="basis-full text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+              Shipped today, Vancouver time, open and closed.
+            </p>
+          ) : null}
+        </form>
 
         {isPicker ? (
           <div className="rounded-xl border border-slate-200/90 bg-white px-3 py-3 shadow-sm ring-1 ring-slate-950/[0.03] dark:border-slate-800 dark:bg-slate-950/80 dark:ring-white/[0.04]">
@@ -1076,7 +951,7 @@ function DeliveryNotesContent() {
                     Scan delivery notes
                   </label>
                   <p className="mt-0.5 max-w-xl text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-                    Last 4–5 digits (or more). Pick each match; repeat to build your list.
+                    Last digits of the DN. Add matches to the list.
                   </p>
                 </div>
                 {pickerChosen.length > 0 ? (
@@ -1252,9 +1127,9 @@ function DeliveryNotesContent() {
           </div>
         ) : null}
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
+        <div className="overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-[13px]">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/95 text-left dark:border-slate-800 dark:bg-slate-900/80">
                   {columns.map((col) => {
@@ -1263,7 +1138,7 @@ function DeliveryNotesContent() {
                     return (
                       <th
                         key={col.key}
-                        className="whitespace-nowrap px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                        className="whitespace-nowrap px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500"
                       >
                         {sortField ? (
                           <button
@@ -1336,7 +1211,7 @@ function DeliveryNotesContent() {
                           return (
                             <td
                               key={col.key}
-                              className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700 dark:text-slate-300"
+                              className="whitespace-nowrap px-3 py-1.5 font-mono text-xs tabular-nums text-slate-500 dark:text-slate-400"
                             >
                               {r.current_priority_no ?? "—"}
                             </td>
@@ -1346,30 +1221,31 @@ function DeliveryNotesContent() {
                           return (
                             <td
                               key={col.key}
-                              className="max-w-[280px] overflow-visible px-3 py-2 font-medium"
+                              className="whitespace-nowrap px-3 py-1.5"
                             >
-                              <Link
-                                href={`/delivery-notes/${r.id}`}
-                                className="block font-mono text-sm text-slate-900 underline decoration-slate-300 underline-offset-2 transition hover:text-sky-800 hover:decoration-sky-600 dark:text-slate-100 dark:decoration-slate-600 dark:hover:text-sky-300"
-                              >
-                                <DeliveryNoteNumber
-                                  dnNumber={r.dn_number}
-                                  isRushed={r.is_rushed}
-                                  rushReason={r.latest_rush_reason}
-                                />
-                              </Link>
-                              {(r.ship_together_other_count ?? 0) > 0 ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void openShipTogetherPeers(r)}
-                                  className="mt-0.5 block max-w-full cursor-pointer truncate text-left text-[10px] leading-tight text-amber-800 underline decoration-amber-600/60 underline-offset-2 transition hover:text-amber-950 hover:decoration-amber-800 dark:text-amber-200/90 dark:decoration-amber-400/50 dark:hover:text-amber-50"
-                                  title={`Same customer, ship-to, location, and ship type as ${r.ship_together_other_count} other delivery note${r.ship_together_other_count === 1 ? "" : "s"} company-wide (ignores this page’s filters). Click to list them.`}
+                              <div className="flex items-center gap-1.5">
+                                <Link
+                                  href={`/delivery-notes/${r.id}`}
+                                  className="font-mono text-[13px] font-medium text-slate-900 hover:text-sky-800 hover:underline dark:text-slate-100 dark:hover:text-sky-300"
                                 >
-                                  Ship with{" "}
-                                  {r.ship_together_other_count} other open DN
-                                  {r.ship_together_other_count === 1 ? "" : "s"}
-                                </button>
-                              ) : null}
+                                  <DeliveryNoteNumber
+                                    dnNumber={r.dn_number}
+                                    isRushed={r.is_rushed}
+                                    rushReason={r.latest_rush_reason}
+                                  />
+                                </Link>
+                                {(r.ship_together_other_count ?? 0) > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void openShipTogetherPeers(r)}
+                                    className="rounded bg-amber-50 px-1 py-px text-[10px] font-semibold tabular-nums text-amber-800 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-900/60"
+                                    title={`${r.ship_together_other_count} other note${r.ship_together_other_count === 1 ? "" : "s"} share this customer, ship-to, and ship type. Click to list them.`}
+                                    aria-label={`${r.ship_together_other_count} other note${r.ship_together_other_count === 1 ? "" : "s"} to ship together`}
+                                  >
+                                    +{r.ship_together_other_count}
+                                  </button>
+                                ) : null}
+                              </div>
                             </td>
                           );
                         }
@@ -1377,34 +1253,36 @@ function DeliveryNotesContent() {
                           return (
                             <td
                               key={col.key}
-                              className="whitespace-nowrap px-3 py-2 text-slate-800 dark:text-slate-200"
+                              title={r.sold_to_name}
+                              className="max-w-[12rem] truncate whitespace-nowrap px-3 py-1.5 text-slate-800 dark:text-slate-200"
                             >
                               {r.sold_to_name}
                             </td>
                           );
                         }
                         if (col.key === "ship_to_address") {
+                          const place = [r.ship_to_street, r.ship_to_region_state]
+                            .filter(Boolean)
+                            .join(", ");
                           return (
                             <td
                               key={col.key}
-                              className="max-w-[360px] truncate px-3 py-2 text-slate-800 dark:text-slate-200"
+                              className="max-w-[18rem] px-3 py-1.5 text-slate-800 dark:text-slate-200"
                               title={
-                                r.ship_to_street
-                                  ? `${r.ship_to_address} — ${r.ship_to_street}`
+                                place
+                                  ? `${r.ship_to_address} — ${place}`
                                   : r.ship_to_address
                               }
                             >
-                              <div className="truncate">{r.ship_to_address}</div>
-                              {r.ship_to_street ? (
-                                <div className="truncate text-xs text-slate-500 dark:text-slate-400">
-                                  {r.ship_to_street}
-                                </div>
-                              ) : null}
-                              {r.ship_to_region_state ? (
-                                <div className="truncate text-xs text-slate-500 dark:text-slate-400">
-                                  {r.ship_to_region_state}
-                                </div>
-                              ) : null}
+                              <div className="truncate">
+                                <span>{r.ship_to_address}</span>
+                                {r.ship_to_region_state ? (
+                                  <span className="text-slate-400 dark:text-slate-500">
+                                    {" "}
+                                    · {r.ship_to_region_state}
+                                  </span>
+                                ) : null}
+                              </div>
                             </td>
                           );
                         }
@@ -1412,7 +1290,7 @@ function DeliveryNotesContent() {
                           return (
                             <td
                               key={col.key}
-                              className="overflow-visible whitespace-nowrap px-3 py-2"
+                              className="overflow-visible whitespace-nowrap px-3 py-1.5"
                             >
                               <StatusBadgeWithHover
                                 status={r.current_status}
@@ -1428,7 +1306,7 @@ function DeliveryNotesContent() {
                           return (
                             <td
                               key={col.key}
-                              className="max-w-[140px] truncate whitespace-nowrap px-3 py-2 text-slate-700 dark:text-slate-300"
+                              className="max-w-[9rem] truncate whitespace-nowrap px-3 py-1.5 text-slate-600 dark:text-slate-300"
                               title={r.shipping_type ?? undefined}
                             >
                               {r.shipping_type ?? "—"}
@@ -1439,7 +1317,7 @@ function DeliveryNotesContent() {
                           return (
                             <td
                               key={col.key}
-                              className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700 dark:text-slate-300"
+                              className="whitespace-nowrap px-3 py-1.5 tabular-nums text-slate-600 dark:text-slate-300"
                             >
                               {formatDate(r.requested_delivery_date)}
                             </td>
@@ -1448,7 +1326,7 @@ function DeliveryNotesContent() {
                         return (
                           <td
                             key={col.key}
-                            className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700 dark:text-slate-300"
+                            className="whitespace-nowrap px-3 py-1.5 tabular-nums text-slate-600 dark:text-slate-300"
                           >
                             {formatDate(r.projected_ship_date)}
                           </td>
@@ -1460,36 +1338,80 @@ function DeliveryNotesContent() {
               </tbody>
             </table>
           </div>
-        </div>
-
-        <section className="flex flex-col gap-3 border-t border-slate-200/90 pt-5 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
-          <p className="tabular-nums">
-            {loading
-              ? "Loading…"
-              : `${rows.length} row${rows.length === 1 ? "" : "s"} on this page · ${total.toLocaleString()} total`}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void goToPage(page - 1)}
-              disabled={loading || page <= 1}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium shadow-sm transition hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
-            >
-              Previous
-            </button>
-            <span className="min-w-[8rem] text-center text-xs tabular-nums">
-              Page {page} / {totalPages}
-            </span>
-            <button
-              type="button"
-              onClick={() => void goToPage(page + 1)}
-              disabled={loading || page >= totalPages}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium shadow-sm transition hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
-            >
-              Next
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <p className="tabular-nums">
+                {loading
+                  ? "Loading…"
+                  : `${rows.length} of ${total.toLocaleString()}`}
+              </p>
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="rows-per-page" className="font-medium text-slate-600 dark:text-slate-300">
+                  Rows
+                </label>
+                <input
+                  id="rows-per-page"
+                  type="number"
+                  min={1}
+                  max={200}
+                  value={draftPageSize}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(v)) {
+                      setDraftPageSize(Math.min(200, Math.max(1, v)));
+                    }
+                  }}
+                  onBlur={(e) => {
+                    const parsed = parseInt(e.target.value, 10);
+                    const n = Math.min(
+                      200,
+                      Math.max(1, Number.isFinite(parsed) ? parsed : pageSize),
+                    );
+                    setDraftPageSize(n);
+                    if (n !== pageSize) {
+                      void applyPageSizeChange(n);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      (e.target as HTMLInputElement).blur();
+                    }
+                  }}
+                  title="Leave field or press Enter to apply page size"
+                  className="h-7 w-12 rounded border border-slate-200 bg-white px-1 text-center text-xs tabular-nums text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900/15 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </div>
+              <Link
+                href="/settings/delivery-notes"
+                className="font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
+              >
+                Columns
+              </Link>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => void goToPage(page - 1)}
+                disabled={loading || page <= 1}
+                className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+              >
+                Previous
+              </button>
+              <span className="min-w-[5.5rem] text-center tabular-nums">
+                {page} / {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => void goToPage(page + 1)}
+                disabled={loading || page >= totalPages}
+                className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
+              >
+                Next
+              </button>
+            </div>
           </div>
-        </section>
+        </div>
       </div>
 
       <ResponseModal
