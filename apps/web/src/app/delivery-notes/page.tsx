@@ -258,7 +258,6 @@ function DeliveryNotesContent() {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [dnNumberFilter, setDnNumberFilter] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
-  const [shipToFilter, setShipToFilter] = useState("");
   const [draftPageSize, setDraftPageSize] = useState(50);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -335,7 +334,6 @@ function DeliveryNotesContent() {
     () =>
       dnNumberFilter.trim().length > 0 ||
       customerFilter.trim().length > 0 ||
-      shipToFilter.trim().length > 0 ||
       statusFilter.trim().length > 0 ||
       openFilter !== "open" ||
       myPickingOnly ||
@@ -346,7 +344,6 @@ function DeliveryNotesContent() {
       customerFilter,
       dnNumberFilter,
       openFilter,
-      shipToFilter,
       statusFilter,
       myPickingOnly,
       myPackingOnly,
@@ -426,7 +423,6 @@ function DeliveryNotesContent() {
       statusFilter?: string;
       dnNumberFilter?: string;
       customerFilter?: string;
-      shipToFilter?: string;
       myPickingOnly?: boolean;
       myPackingOnly?: boolean;
       myShippingOnly?: boolean;
@@ -444,7 +440,6 @@ function DeliveryNotesContent() {
     const statusF = q?.statusFilter ?? statusFilter;
     const dnF = q?.dnNumberFilter ?? dnNumberFilter;
     const custF = q?.customerFilter ?? customerFilter;
-    const shipF = q?.shipToFilter ?? shipToFilter;
     const myPick = q?.myPickingOnly ?? myPickingOnly;
     const myPack = q?.myPackingOnly ?? myPackingOnly;
     const myShip = q?.myShippingOnly ?? myShippingOnly;
@@ -476,8 +471,6 @@ function DeliveryNotesContent() {
     if (dn) params.set("dnNumber", dn);
     const cust = custF.trim();
     if (cust) params.set("customer", cust);
-    const st = shipF.trim();
-    if (st) params.set("shipTo", st);
     params.set("page", String(Math.max(1, nextPage)));
     params.set("pageSize", String(Math.min(200, Math.max(1, nextPageSize))));
     params.set("sortBy", sortByVal);
@@ -806,7 +799,6 @@ function DeliveryNotesContent() {
   async function clearFiltersAndRefresh() {
     setDnNumberFilter("");
     setCustomerFilter("");
-    setShipToFilter("");
     setStatusFilter("");
     setOpenFilter("open");
     setRushedOnly(false);
@@ -825,7 +817,6 @@ function DeliveryNotesContent() {
     await load(1, pageSize, {
       dnNumberFilter: "",
       customerFilter: "",
-      shipToFilter: "",
       statusFilter: "",
       openFilter: "open",
       rushedOnly: false,
@@ -1175,20 +1166,7 @@ function DeliveryNotesContent() {
             onChange={(e) => setCustomerFilter(e.target.value)}
             placeholder="Customer"
             title="Partial match on customer name or sold-to code"
-            className={`${fieldClass} w-40`}
-          />
-          <label htmlFor="filter-ship-to" className="sr-only">
-            Ship-to
-          </label>
-          <input
-            id="filter-ship-to"
-            type="search"
-            autoComplete="off"
-            value={shipToFilter}
-            onChange={(e) => setShipToFilter(e.target.value)}
-            placeholder="Ship-to"
-            title="Partial match on ship-to code or address fields"
-            className={`${fieldClass} min-w-[8rem] flex-1`}
+            className={`${fieldClass} min-w-[10rem] flex-1`}
           />
           <label htmlFor="filter-open" className="sr-only">
             Open
