@@ -48,6 +48,39 @@ export class ListDeliveryNotesQueryDto {
    */
   myPicking?: boolean;
 
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === '') return undefined;
+    return value === true || value === 'true';
+  })
+  @IsBoolean()
+  /**
+   * When true, return only DNs in PACKING that the current user started.
+   * Ignores `status`.
+   */
+  myPacking?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === '') return undefined;
+    return value === true || value === 'true';
+  })
+  @IsBoolean()
+  /**
+   * When true, return only DNs in SHIPPING_IN_PROGRESS that the current user
+   * started. Ignores `status`.
+   */
+  myShipping?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === '') return undefined;
+    return value === true || value === 'true';
+  })
+  @IsBoolean()
+  /** When true, return only rushed DNs. Combines with other filters. */
+  isRushed?: boolean;
+
   /** Partial match on delivery note number (case-insensitive). */
   @IsOptional()
   @Transform(trimToUndefined)

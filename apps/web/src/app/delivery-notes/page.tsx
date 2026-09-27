@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { OperationsShell } from "@/components/operations-shell";
 import { ResponseModal } from "@/components/response-modal";
@@ -77,7 +78,21 @@ type DeliveryNoteDailyStats = {
   picked_total: number;
   packed_total: number;
   shipped_today: number;
+  /** Open-note counts keyed by `dn_status` enum string. */
+  by_status?: Record<string, number>;
+  rushed_open?: number;
 };
+
+/** Pipeline stages shown as clickable chips (closed stages excluded). */
+const PIPELINE_STAGES = [
+  "NEW",
+  "PICKING",
+  "PICKED",
+  "PACKING",
+  "PACKED",
+  "SHIPPING_IN_PROGRESS",
+  "ON_HOLD",
+] as const;
 
 type DnSuffixSuggestion = {
   id: string;
@@ -122,9 +137,114 @@ function formatTotalProducts(raw: string | undefined): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
+/** Reusable on/off switch with label + hint, matching the existing picker panel. */
+function ViewToggle({
+  id,
+  checked,
+  disabled,
+  onChange,
+  title,
+  label,
+  hint,
+}: {
+  id: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (next: boolean) => void;
+  title: string;
+  label: string;
+  hint: ReactNode;
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className="group flex max-w-md cursor-pointer items-start gap-3 rounded-lg border border-transparent p-1 transition hover:border-slate-200/80 hover:bg-slate-50/90 dark:hover:border-slate-700 dark:hover:bg-slate-900/50 sm:items-center"
+      title={title}
+    >
+      <span className="relative mt-0.5 inline-flex h-6 w-10 shrink-0 sm:mt-0">
+        <input
+          id={id}
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+          className="peer sr-only"
+        />
+        <span
+          aria-hidden
+          className="absolute inset-0 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-slate-400 peer-checked:bg-emerald-600 peer-disabled:opacity-40 dark:bg-slate-700 dark:peer-checked:bg-emerald-600"
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/[0.06] transition-transform duration-200 ease-out peer-checked:translate-x-4 dark:ring-white/10"
+        />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-xs font-semibold text-slate-800 dark:text-slate-100">
+          {label}
+        </span>
+        <span className="mt-0.5 block text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+          {hint}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+/** Clickable pipeline stage chip with live count. */
+function PipelineChip({
+  status,
+  count,
+  active,
+  accent,
+  onSelect,
+}: {
+  status: string;
+  count: number;
+  active: boolean;
+  accent?: "amber" | "red";
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={active}
+      title={`Filter table: ${formatDnStatusLabel(status)}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tabular-nums transition ${
+        active
+          ? "border-slate-900 bg-slate-900 text-white shadow-sm dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
+          : accent === "red"
+            ? "border-red-200 bg-red-50 text-red-800 hover:border-red-300 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-900/50"
+            : accent === "amber"
+              ? "border-amber-200 bg-amber-50 text-amber-900 hover:border-amber-300 hover:bg-amber-100 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/50"
+              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+      }`}
+    >
+      <span className="uppercase tracking-wide">{formatDnStatusLabel(status)}</span>
+      <span
+        className={`font-mono font-semibold ${
+          active
+            ? ""
+            : accent === "red"
+              ? "text-red-700 dark:text-red-300"
+              : "text-slate-900 dark:text-slate-100"
+        }`}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
 function DeliveryNotesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  /** Active role drives which view toggles this screen offers. */
+  const activeRoleCode = (getActiveRoleCode() ?? "").trim().toUpperCase();
+  const isPicker = activeRoleCode === "PICKER";
+  const isPacker = activeRoleCode === "PACKER";
+  const isShipper = activeRoleCode === "SHIPPER";
   const [ready, setReady] = useState(false);
   const [rows, setRows] = useState<DeliveryNoteRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -148,8 +268,16 @@ function DeliveryNotesContent() {
     DEFAULT_VISIBLE_COLUMNS,
   );
   const [myPickingOnly, setMyPickingOnly] = useState(false);
-  const [readyToPackOnly, setReadyToPackOnly] = useState(false);
-  const [readyToShipOnly, setReadyToShipOnly] = useState(false);
+  const [myPackingOnly, setMyPackingOnly] = useState(false);
+  const [myShippingOnly, setMyShippingOnly] = useState(false);
+  const [rushedOnly, setRushedOnly] = useState(false);
+  /** Packers land on Ready to pack; shippers land on Ready to ship. */
+  const [readyToPackOnly, setReadyToPackOnly] = useState(
+    () => activeRoleCode === "PACKER",
+  );
+  const [readyToShipOnly, setReadyToShipOnly] = useState(
+    () => activeRoleCode === "SHIPPER",
+  );
   const [pickerChosen, setPickerChosen] = useState<PickerChosenDn[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [pickerQuickDn, setPickerQuickDn] = useState("");
@@ -172,8 +300,6 @@ function DeliveryNotesContent() {
   } | null>(null);
 
   const importBatchId = searchParams.get("importBatch");
-
-  const isPicker = getActiveRoleCode() === "PICKER";
 
   const [dailyStats, setDailyStats] = useState<DeliveryNoteDailyStats | null>(
     null,
@@ -208,7 +334,10 @@ function DeliveryNotesContent() {
       shipToFilter.trim().length > 0 ||
       statusFilter.trim().length > 0 ||
       openFilter !== "open" ||
-      myPickingOnly,
+      myPickingOnly ||
+      myPackingOnly ||
+      myShippingOnly ||
+      rushedOnly,
     [
       customerFilter,
       dnNumberFilter,
@@ -216,8 +345,18 @@ function DeliveryNotesContent() {
       shipToFilter,
       statusFilter,
       myPickingOnly,
+      myPackingOnly,
+      myShippingOnly,
+      rushedOnly,
     ],
   );
+
+  const anyViewToggleOn =
+    myPickingOnly ||
+    myPackingOnly ||
+    myShippingOnly ||
+    readyToPackOnly ||
+    readyToShipOnly;
 
   const canBulkStartPicking =
     isPicker &&
@@ -285,6 +424,9 @@ function DeliveryNotesContent() {
       customerFilter?: string;
       shipToFilter?: string;
       myPickingOnly?: boolean;
+      myPackingOnly?: boolean;
+      myShippingOnly?: boolean;
+      rushedOnly?: boolean;
       readyToPackOnly?: boolean;
       readyToShipOnly?: boolean;
       sortBy?: DeliveryNoteSortField;
@@ -300,6 +442,9 @@ function DeliveryNotesContent() {
     const custF = q?.customerFilter ?? customerFilter;
     const shipF = q?.shipToFilter ?? shipToFilter;
     const myPick = q?.myPickingOnly ?? myPickingOnly;
+    const myPack = q?.myPackingOnly ?? myPackingOnly;
+    const myShip = q?.myShippingOnly ?? myShippingOnly;
+    const rushOnly = q?.rushedOnly ?? rushedOnly;
     const packOnly = q?.readyToPackOnly ?? readyToPackOnly;
     const shipOnly = q?.readyToShipOnly ?? readyToShipOnly;
     const sortByVal = q?.sortBy ?? sortBy;
@@ -309,12 +454,19 @@ function DeliveryNotesContent() {
     params.set("is_open", openF === "open" ? "true" : "false");
     if (myPick) {
       params.set("myPicking", "true");
+    } else if (myPack) {
+      params.set("myPacking", "true");
+    } else if (myShip) {
+      params.set("myShipping", "true");
     } else if (packOnly) {
       params.set("status", "PICKED");
     } else if (shipOnly) {
       params.set("status", "PACKED");
     } else if (statusF) {
       params.set("status", statusF);
+    }
+    if (rushOnly) {
+      params.set("isRushed", "true");
     }
     const dn = dnF.trim();
     if (dn) params.set("dnNumber", dn);
@@ -565,13 +717,102 @@ function DeliveryNotesContent() {
     await load(1, n);
   }
 
+  type ViewToggleState = {
+    myPickingOnly: boolean;
+    myPackingOnly: boolean;
+    myShippingOnly: boolean;
+    readyToPackOnly: boolean;
+    readyToShipOnly: boolean;
+  };
+
+  /** View toggles are mutually exclusive; turning one on clears the others. */
+  async function applyViewToggles(next: Partial<ViewToggleState>) {
+    const v: ViewToggleState = {
+      myPickingOnly: next.myPickingOnly ?? myPickingOnly,
+      myPackingOnly: next.myPackingOnly ?? myPackingOnly,
+      myShippingOnly: next.myShippingOnly ?? myShippingOnly,
+      readyToPackOnly: next.readyToPackOnly ?? readyToPackOnly,
+      readyToShipOnly: next.readyToShipOnly ?? readyToShipOnly,
+    };
+    const anyOn =
+      v.myPickingOnly ||
+      v.myPackingOnly ||
+      v.myShippingOnly ||
+      v.readyToPackOnly ||
+      v.readyToShipOnly;
+    if (anyOn) {
+      // exactly one stays on
+      const first: (keyof ViewToggleState)[] = [
+        "myPickingOnly",
+        "myPackingOnly",
+        "myShippingOnly",
+        "readyToPackOnly",
+        "readyToShipOnly",
+      ];
+      const keep = first.find((k) => next[k] === true) ?? first.find((k) => v[k]);
+      for (const k of first) v[k] = k === keep;
+    }
+    setMyPickingOnly(v.myPickingOnly);
+    setMyPackingOnly(v.myPackingOnly);
+    setMyShippingOnly(v.myShippingOnly);
+    setReadyToPackOnly(v.readyToPackOnly);
+    setReadyToShipOnly(v.readyToShipOnly);
+    setPage(1);
+    await load(1, pageSize, v);
+  }
+
+  /** Pipeline chip click: filter by stage, clearing view toggles. */
+  async function selectPipelineStage(stage: string) {
+    const next = normDnStatus(statusFilter) === stage ? "" : stage;
+    setStatusFilter(next);
+    setMyPickingOnly(false);
+    setMyPackingOnly(false);
+    setMyShippingOnly(false);
+    setReadyToPackOnly(false);
+    setReadyToShipOnly(false);
+    setPage(1);
+    await load(1, pageSize, {
+      statusFilter: next,
+      myPickingOnly: false,
+      myPackingOnly: false,
+      myShippingOnly: false,
+      readyToPackOnly: false,
+      readyToShipOnly: false,
+    });
+  }
+
+  async function toggleRushedOnly() {
+    const next = !rushedOnly;
+    setRushedOnly(next);
+    setPage(1);
+    await load(1, pageSize, { rushedOnly: next });
+  }
+
+  /** Role defaults: packers land on Ready to pack, shippers on Ready to ship. */
+  function roleDefaultToggles(role: string): ViewToggleState {
+    return {
+      myPickingOnly: false,
+      myPackingOnly: false,
+      myShippingOnly: false,
+      readyToPackOnly: role === "PACKER",
+      readyToShipOnly: role === "SHIPPER",
+    };
+  }
+
   async function clearFiltersAndRefresh() {
     setDnNumberFilter("");
     setCustomerFilter("");
     setShipToFilter("");
     setStatusFilter("");
     setOpenFilter("open");
-    setMyPickingOnly(false);
+    setRushedOnly(false);
+    const role = (getActiveRoleCode() ?? "").trim().toUpperCase();
+    const defaults = roleDefaultToggles(role);
+    setMyPickingOnly(defaults.myPickingOnly);
+    setMyPackingOnly(defaults.myPackingOnly);
+    setMyShippingOnly(defaults.myShippingOnly);
+    setReadyToPackOnly(defaults.readyToPackOnly);
+    setReadyToShipOnly(defaults.readyToShipOnly);
     setPickerChosen([]);
     setPickerQuickDn("");
     setPickerSuggestions([]);
@@ -583,7 +824,8 @@ function DeliveryNotesContent() {
       shipToFilter: "",
       statusFilter: "",
       openFilter: "open",
-      myPickingOnly: false,
+      rushedOnly: false,
+      ...defaults,
     });
   }
 
@@ -784,39 +1026,94 @@ function DeliveryNotesContent() {
     <OperationsShell title="Delivery notes">
       <div className="space-y-2">
         <section
-          aria-label="Today's delivery note statistics"
-          className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/80"
+          aria-label="Delivery note pipeline"
+          className="rounded-lg border border-slate-200/90 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/80"
         >
-          <h2 className="sr-only">Today</h2>
-          <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            {(
-              [
-                ["Due", dailyStats?.due_today, "Open notes due today"],
-                ["Picked", dailyStats?.picked_total, "Open notes in Picked"],
-                ["Packed", dailyStats?.packed_total, "Open notes in Packed"],
-                ["Shipped", dailyStats?.shipped_today, "Marked shipped today"],
-              ] as const
-            ).map(([label, value, title]) => (
-              <div key={label} className="flex items-baseline gap-1.5" title={title}>
-                <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
-                  {label}
-                </dt>
-                <dd className="font-mono text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-50">
-                  {dailyStatsLoading && dailyStats == null ? "…" : (value ?? "—")}
-                </dd>
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
+            <h2 className="mr-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+              Pipeline
+            </h2>
+            {PIPELINE_STAGES.map((stage, i) => {
+              const count =
+                dailyStatsLoading && dailyStats == null
+                  ? null
+                  : (dailyStats?.by_status?.[stage] ?? 0);
+              return (
+                <span key={stage} className="inline-flex items-center gap-1.5">
+                  {i > 0 && stage !== "ON_HOLD" ? (
+                    <span
+                      aria-hidden
+                      className="text-[10px] text-slate-300 dark:text-slate-600"
+                    >
+                      →
+                    </span>
+                  ) : null}
+                  <PipelineChip
+                    status={stage}
+                    count={count ?? 0}
+                    active={
+                      normDnStatus(statusFilter) === stage && !anyViewToggleOn
+                    }
+                    accent={stage === "ON_HOLD" ? "amber" : undefined}
+                    onSelect={() => void selectPipelineStage(stage)}
+                  />
+                </span>
+              );
+            })}
+            <span
+              aria-hidden
+              className="mx-1 hidden h-4 w-px bg-slate-200 sm:inline-block dark:bg-slate-700"
+            />
+            <PipelineChip
+              status="RUSHED"
+              count={
+                dailyStatsLoading && dailyStats == null
+                  ? 0
+                  : (dailyStats?.rushed_open ?? 0)
+              }
+              active={rushedOnly}
+              accent="red"
+              onSelect={() => void toggleRushedOnly()}
+            />
+            <div className="ml-auto flex items-center gap-3">
+              <div
+                className="flex items-baseline gap-1.5"
+                title="Open notes due today"
+              >
+                <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                  Due
+                </span>
+                <span className="font-mono text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-50">
+                  {dailyStatsLoading && dailyStats == null
+                    ? "…"
+                    : (dailyStats?.due_today ?? "—")}
+                </span>
               </div>
-            ))}
-          </dl>
-          <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-400">
-            <span className="tabular-nums">{dailyStats?.date ?? "PT"}</span>
-            <button
-              type="button"
-              disabled={dailyStatsLoading}
-              onClick={() => void loadDailyStats()}
-              className="font-medium text-slate-500 hover:text-slate-800 disabled:opacity-50 dark:hover:text-slate-200"
-            >
-              {dailyStatsLoading ? "…" : "Refresh"}
-            </button>
+              <div
+                className="flex items-baseline gap-1.5"
+                title="Marked shipped today"
+              >
+                <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                  Shipped
+                </span>
+                <span className="font-mono text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-50">
+                  {dailyStatsLoading && dailyStats == null
+                    ? "…"
+                    : (dailyStats?.shipped_today ?? "—")}
+                </span>
+              </div>
+              <span className="tabular-nums text-[11px] text-slate-400">
+                {dailyStats?.date ?? "PT"}
+              </span>
+              <button
+                type="button"
+                disabled={dailyStatsLoading}
+                onClick={() => void loadDailyStats()}
+                className="text-[11px] font-medium text-slate-500 hover:text-slate-800 disabled:opacity-50 dark:hover:text-slate-200"
+              >
+                {dailyStatsLoading ? "…" : "Refresh"}
+              </button>
+            </div>
           </div>
         </section>
 
@@ -1070,143 +1367,59 @@ function DeliveryNotesContent() {
 
             <div className="flex flex-col gap-3 border-t border-slate-100 pt-3 dark:border-slate-800/90">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <label
-                  htmlFor="picker-my-queue"
-                  className="group flex max-w-md cursor-pointer items-start gap-3 rounded-lg border border-transparent p-1 transition hover:border-slate-200/80 hover:bg-slate-50/90 dark:hover:border-slate-700 dark:hover:bg-slate-900/50 sm:items-center"
+                <ViewToggle
+                  id="picker-my-queue"
+                  checked={myPickingOnly}
+                  disabled={loading}
+                  onChange={(next) => void applyViewToggles({ myPickingOnly: next })}
                   title="Filters the table below to PICKING notes you started."
-                >
-                  <span className="relative mt-0.5 inline-flex h-6 w-10 shrink-0 sm:mt-0">
-                    <input
-                      id="picker-my-queue"
-                      type="checkbox"
-                      checked={myPickingOnly}
-                      disabled={loading}
-                      onChange={(e) => {
-                        const next = e.target.checked;
-                        setMyPickingOnly(next);
-                        if (next) {
-                          setReadyToPackOnly(false);
-                          setReadyToShipOnly(false);
-                        }
-                        setPage(1);
-                        void load(1, pageSize, {
-                          myPickingOnly: next,
-                          readyToPackOnly: false,
-                          readyToShipOnly: false,
-                        });
-                      }}
-                      className="peer sr-only"
-                    />
-                    <span
-                      aria-hidden
-                      className="absolute inset-0 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-slate-400 peer-checked:bg-emerald-600 peer-disabled:opacity-40 dark:bg-slate-700 dark:peer-checked:bg-emerald-600"
-                    />
-                    <span
-                      aria-hidden
-                      className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/[0.06] transition-transform duration-200 ease-out peer-checked:translate-x-4 dark:ring-white/10"
-                    />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-semibold text-slate-800 dark:text-slate-100">
-                      My queue
-                    </span>
-                    <span className="mt-0.5 block text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-                      Table: only <span className="font-medium text-slate-600 dark:text-slate-300">PICKING</span> you started.
-                    </span>
-                  </span>
-                </label>
+                  label="My queue"
+                  hint={
+                    <>
+                      Table: only{" "}
+                      <span className="font-medium text-slate-600 dark:text-slate-300">
+                        PICKING
+                      </span>{" "}
+                      you started.
+                    </>
+                  }
+                />
 
-                <label
-                  htmlFor="ready-to-pack"
-                  className="group flex max-w-md cursor-pointer items-start gap-3 rounded-lg border border-transparent p-1 transition hover:border-slate-200/80 hover:bg-slate-50/90 dark:hover:border-slate-700 dark:hover:bg-slate-900/50 sm:items-center"
+                <ViewToggle
+                  id="ready-to-pack"
+                  checked={readyToPackOnly}
+                  disabled={loading}
+                  onChange={(next) => void applyViewToggles({ readyToPackOnly: next })}
                   title="Filters the table below to PICKED notes ready to pack."
-                >
-                  <span className="relative mt-0.5 inline-flex h-6 w-10 shrink-0 sm:mt-0">
-                    <input
-                      id="ready-to-pack"
-                      type="checkbox"
-                      checked={readyToPackOnly}
-                      disabled={loading}
-                      onChange={(e) => {
-                        const next = e.target.checked;
-                        setReadyToPackOnly(next);
-                        if (next) {
-                          setReadyToShipOnly(false);
-                          setMyPickingOnly(false);
-                        }
-                        setPage(1);
-                        void load(1, pageSize, {
-                          readyToPackOnly: next,
-                          readyToShipOnly: false,
-                          myPickingOnly: false,
-                        });
-                      }}
-                      className="peer sr-only"
-                    />
-                    <span
-                      aria-hidden
-                      className="absolute inset-0 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-slate-400 peer-checked:bg-emerald-600 peer-disabled:opacity-40 dark:bg-slate-700 dark:peer-checked:bg-emerald-600"
-                    />
-                    <span
-                      aria-hidden
-                      className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/[0.06] transition-transform duration-200 ease-out peer-checked:translate-x-4 dark:ring-white/10"
-                    />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-semibold text-slate-800 dark:text-slate-100">
-                      Ready to pack
-                    </span>
-                    <span className="mt-0.5 block text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-                      Table: only <span className="font-medium text-slate-600 dark:text-slate-300">PICKED</span> notes.
-                    </span>
-                  </span>
-                </label>
+                  label="Ready to pack"
+                  hint={
+                    <>
+                      Table: only{" "}
+                      <span className="font-medium text-slate-600 dark:text-slate-300">
+                        PICKED
+                      </span>{" "}
+                      notes.
+                    </>
+                  }
+                />
 
-                <label
-                  htmlFor="ready-to-ship"
-                  className="group flex max-w-md cursor-pointer items-start gap-3 rounded-lg border border-transparent p-1 transition hover:border-slate-200/80 hover:bg-slate-50/90 dark:hover:border-slate-700 dark:hover:bg-slate-900/50 sm:items-center"
+                <ViewToggle
+                  id="ready-to-ship"
+                  checked={readyToShipOnly}
+                  disabled={loading}
+                  onChange={(next) => void applyViewToggles({ readyToShipOnly: next })}
                   title="Filters the table below to PACKED notes ready to ship."
-                >
-                  <span className="relative mt-0.5 inline-flex h-6 w-10 shrink-0 sm:mt-0">
-                    <input
-                      id="ready-to-ship"
-                      type="checkbox"
-                      checked={readyToShipOnly}
-                      disabled={loading}
-                      onChange={(e) => {
-                        const next = e.target.checked;
-                        setReadyToShipOnly(next);
-                        if (next) {
-                          setReadyToPackOnly(false);
-                          setMyPickingOnly(false);
-                        }
-                        setPage(1);
-                        void load(1, pageSize, {
-                          readyToShipOnly: next,
-                          readyToPackOnly: false,
-                          myPickingOnly: false,
-                        });
-                      }}
-                      className="peer sr-only"
-                    />
-                    <span
-                      aria-hidden
-                      className="absolute inset-0 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-slate-400 peer-checked:bg-emerald-600 peer-disabled:opacity-40 dark:bg-slate-700 dark:peer-checked:bg-emerald-600"
-                    />
-                    <span
-                      aria-hidden
-                      className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/[0.06] transition-transform duration-200 ease-out peer-checked:translate-x-4 dark:ring-white/10"
-                    />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-semibold text-slate-800 dark:text-slate-100">
-                      Ready to ship
-                    </span>
-                    <span className="mt-0.5 block text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-                      Table: only <span className="font-medium text-slate-600 dark:text-slate-300">PACKED</span> notes.
-                    </span>
-                  </span>
-                </label>
+                  label="Ready to ship"
+                  hint={
+                    <>
+                      Table: only{" "}
+                      <span className="font-medium text-slate-600 dark:text-slate-300">
+                        PACKED
+                      </span>{" "}
+                      notes.
+                    </>
+                  }
+                />
 
                 <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
                   <button
@@ -1236,6 +1449,90 @@ function DeliveryNotesContent() {
             </div>
           </div>
         ) : null}
+
+        {isPacker ? (
+          <div className="rounded-xl border border-slate-200/90 bg-white px-3 py-3 shadow-sm ring-1 ring-slate-950/[0.03] dark:border-slate-800 dark:bg-slate-950/80 dark:ring-white/[0.04]">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <ViewToggle
+                id="packer-ready-to-pack"
+                checked={readyToPackOnly}
+                disabled={loading}
+                onChange={(next) => void applyViewToggles({ readyToPackOnly: next })}
+                title="Filters the table below to PICKED notes ready to pack."
+                label="Ready to pack"
+                hint={
+                  <>
+                    Table: only{" "}
+                    <span className="font-medium text-slate-600 dark:text-slate-300">
+                      PICKED
+                    </span>{" "}
+                    notes ready for you.
+                  </>
+                }
+              />
+              <ViewToggle
+                id="packer-my-packing"
+                checked={myPackingOnly}
+                disabled={loading}
+                onChange={(next) => void applyViewToggles({ myPackingOnly: next })}
+                title="Filters the table below to PACKING notes you started."
+                label="My packing"
+                hint={
+                  <>
+                    Table: only{" "}
+                    <span className="font-medium text-slate-600 dark:text-slate-300">
+                      PACKING
+                    </span>{" "}
+                    you started.
+                  </>
+                }
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {isShipper ? (
+          <div className="rounded-xl border border-slate-200/90 bg-white px-3 py-3 shadow-sm ring-1 ring-slate-950/[0.03] dark:border-slate-800 dark:bg-slate-950/80 dark:ring-white/[0.04]">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <ViewToggle
+                id="shipper-ready-to-ship"
+                checked={readyToShipOnly}
+                disabled={loading}
+                onChange={(next) => void applyViewToggles({ readyToShipOnly: next })}
+                title="Filters the table below to PACKED notes ready to ship."
+                label="Ready to ship"
+                hint={
+                  <>
+                    Table: only{" "}
+                    <span className="font-medium text-slate-600 dark:text-slate-300">
+                      PACKED
+                    </span>{" "}
+                    notes ready for you.
+                  </>
+                }
+              />
+              <ViewToggle
+                id="shipper-my-shipping"
+                checked={myShippingOnly}
+                disabled={loading}
+                onChange={(next) => void applyViewToggles({ myShippingOnly: next })}
+                title="Filters the table below to notes you are shipping."
+                label="My shipping"
+                hint={
+                  <>
+                    Table: only{" "}
+                    <span className="font-medium text-slate-600 dark:text-slate-300">
+                      SHIPPING
+                    </span>{" "}
+                    you started.
+                  </>
+                }
+              />
+            </div>
+          </div>
+        ) : null}
+
+
 
         <div className="overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
           <div className="overflow-x-auto">

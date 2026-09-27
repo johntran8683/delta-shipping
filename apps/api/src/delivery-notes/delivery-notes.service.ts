@@ -68,8 +68,10 @@ export class DeliveryNotesService {
     const skip = (page - 1) * pageSize;
 
     const conditions: Prisma.DeliveryNoteWhereInput[] = [];
+    const myQueueFilter =
+      query.myPicking || query.myPacking || query.myShipping;
     const shippedTodayFilter =
-      !query.myPicking && query.status === dn_status.SHIPPED;
+      !myQueueFilter && query.status === dn_status.SHIPPED;
 
     if (!shippedTodayFilter) {
       if (query.is_open === undefined) {
@@ -89,6 +91,26 @@ export class DeliveryNotesService {
         current_status: dn_status.PICKING,
         picking_started_by_user_id: currentUserId,
       });
+    } else if (query.myPacking) {
+      if (!currentUserId?.trim()) {
+        throw new BadRequestException(
+          'myPacking requires an authenticated user',
+        );
+      }
+      conditions.push({
+        current_status: dn_status.PACKING,
+        packing_started_by_user_id: currentUserId,
+      });
+    } else if (query.myShipping) {
+      if (!currentUserId?.trim()) {
+        throw new BadRequestException(
+          'myShipping requires an authenticated user',
+        );
+      }
+      conditions.push({
+        current_status: dn_status.SHIPPING_IN_PROGRESS,
+        shipping_started_by_user_id: currentUserId,
+      });
     } else if (shippedTodayFilter) {
       const { startUtc, endUtc } = getVancouverDayBoundsUtc();
       conditions.push({
@@ -101,6 +123,10 @@ export class DeliveryNotesService {
       });
     } else if (query.status) {
       conditions.push({ current_status: query.status });
+    }
+
+    if (query.isRushed) {
+      conditions.push({ is_rushed: true });
     }
 
     const dnNumber = query.dnNumber?.trim();
@@ -1017,31 +1043,46 @@ export class DeliveryNotesService {
 
     const openWhere = { is_open: true };
 
-    const [dueToday, pickedTotal, packedTotal, shippedGroups] =
-      await Promise.all([
-        this.prisma.deliveryNote.count({
-          where: {
-            ...openWhere,
-            current_status: {
-              notIn: [
-                dn_status.SHIPPED,
-                dn_status.CANCELLED,
-                dn_status.ON_HOLD,
-              ],
-            },
+    const [
+      dueToday,
+      pickedTotal,
+      packedTotal,
+      shippedGroups,
+      byStatusGroups,
+      rushedOpen,
+    ] = await Promise.all([
+      this.prisma.deliveryNote.count({
+        where: {
+          ...openWhere,
+          current_status: {
+            notIn: [dn_status.SHIPPED, dn_status.CANCELLED, dn_status.ON_HOLD],
           },
-        }),
-        this.prisma.deliveryNote.count({
-          where: { ...openWhere, current_status: dn_status.PICKED },
-        }),
-        this.prisma.deliveryNote.count({
-          where: { ...openWhere, current_status: dn_status.PACKED },
-        }),
-        this.prisma.dnStatusHistory.groupBy({
-          by: ['delivery_note_id'],
-          where: { to_status: dn_status.SHIPPED, changed_at: changedToday },
-        }),
-      ]);
+        },
+      }),
+      this.prisma.deliveryNote.count({
+        where: { ...openWhere, current_status: dn_status.PICKED },
+      }),
+      this.prisma.deliveryNote.count({
+        where: { ...openWhere, current_status: dn_status.PACKED },
+      }),
+      this.prisma.dnStatusHistory.groupBy({
+        by: ['delivery_note_id'],
+        where: { to_status: dn_status.SHIPPED, changed_at: changedToday },
+      }),
+      this.prisma.deliveryNote.groupBy({
+        by: ['current_status'],
+        where: openWhere,
+        _count: { _all: true },
+      }),
+      this.prisma.deliveryNote.count({
+        where: { ...openWhere, is_rushed: true },
+      }),
+    ]);
+
+    const by_status: Record<string, number> = {};
+    for (const g of byStatusGroups) {
+      by_status[g.current_status] = g._count._all;
+    }
 
     return {
       date: localDate,
@@ -1050,6 +1091,8 @@ export class DeliveryNotesService {
       picked_total: pickedTotal,
       packed_total: packedTotal,
       shipped_today: shippedGroups.length,
+      by_status,
+      rushed_open: rushedOpen,
     };
   }
 
