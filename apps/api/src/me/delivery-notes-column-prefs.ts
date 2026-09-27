@@ -4,6 +4,9 @@ export const COLUMN_DISPLAY_ORDER = [
   'dn_number',
   'current_priority_no',
   'sold_to_name',
+  'so_number',
+  'customer_po',
+  'po_date',
   'ship_to_address',
   'current_status',
   'shipping_type',
@@ -18,11 +21,14 @@ export const REQUIRED_DELIVERY_NOTES_COLUMNS: DeliveryNotesColumnKey[] = [
   'current_status',
 ];
 
-/** Default when user has never saved: DN, Customer, Ship-to, Ship type, Priority, Req. delivery, Status */
+/** Default when user has never saved: DN, Customer, SO #, PO #, PO date, Ship-to, Ship type, Priority, Req. delivery, Status */
 export const DEFAULT_DELIVERY_NOTES_VISIBLE_COLUMNS: DeliveryNotesColumnKey[] =
   [
     'dn_number',
     'sold_to_name',
+    'so_number',
+    'customer_po',
+    'po_date',
     'ship_to_address',
     'shipping_type',
     'current_priority_no',

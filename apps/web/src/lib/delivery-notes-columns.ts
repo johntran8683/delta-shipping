@@ -7,6 +7,9 @@ export type ColumnKey =
   | "dn_number"
   | "current_priority_no"
   | "sold_to_name"
+  | "so_number"
+  | "customer_po"
+  | "po_date"
   | "ship_to_address"
   | "current_status"
   | "shipping_type"
@@ -17,6 +20,9 @@ export const COLUMN_DISPLAY_ORDER: ColumnKey[] = [
   "dn_number",
   "current_priority_no",
   "sold_to_name",
+  "so_number",
+  "customer_po",
+  "po_date",
   "ship_to_address",
   "current_status",
   "shipping_type",
@@ -33,6 +39,9 @@ export const REQUIRED_COLUMNS: ColumnKey[] = [
 export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = [
   "dn_number",
   "sold_to_name",
+  "so_number",
+  "customer_po",
+  "po_date",
   "ship_to_address",
   "shipping_type",
   "current_priority_no",
@@ -44,6 +53,9 @@ export const COLUMN_LABELS: Record<ColumnKey, string> = {
   dn_number: "DN #",
   current_priority_no: "Priority",
   sold_to_name: "Customer",
+  so_number: "SO #",
+  customer_po: "PO #",
+  po_date: "PO date",
   ship_to_address: "Ship-to",
   current_status: "Status",
   shipping_type: "Ship type",

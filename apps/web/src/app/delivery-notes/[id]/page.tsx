@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { OperationsShell } from "@/components/operations-shell";
 import { StatusBadgeWithHover } from "@/components/status-badge-with-hover";
@@ -24,6 +24,7 @@ import { SupervisorDnControls } from "@/components/supervisor-dn-controls";
 type LineRow = {
   id: string;
   doc_item: number;
+  so_number: string | null;
   material_code: string | null;
   material_description: string | null;
   order_qty: string | null;
@@ -1153,6 +1154,18 @@ export default function DeliveryNoteDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  /** Distinct SO numbers across this DN's lines. */
+  const distinctSoNumbers = useMemo(() => {
+    if (!detail) return [];
+    return Array.from(
+      new Set(
+        detail.lines
+          .map((l) => l.so_number?.trim())
+          .filter((s): s is string => !!s),
+      ),
+    ).sort();
+  }, [detail]);
+
   const [updateStatusOpen, setUpdateStatusOpen] = useState(false);
   const [packBoxesModalMode, setPackBoxesModalMode] =
     useState<PackBoxesModalMode>("complete");
@@ -2114,6 +2127,14 @@ export default function DeliveryNoteDetailPage() {
                       rushReason={detail.latest_rush_reason}
                       numberClassName="font-mono text-lg font-semibold tabular-nums tracking-tight text-slate-900 print:text-[13pt] dark:text-slate-50"
                     />
+                    {distinctSoNumbers.length > 0 ? (
+                      <p className="mt-1 font-mono text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                        <span className="font-sans text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+                          SO{" "}
+                        </span>
+                        {distinctSoNumbers.join(", ")}
+                      </p>
+                    ) : null}
                   </div>
                   <p className="text-sm text-slate-700 dark:text-slate-200">
                     <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
@@ -2175,6 +2196,7 @@ export default function DeliveryNoteDetailPage() {
                         <th className="w-16 px-5 py-2 font-semibold print:pl-[10mm]">
                           Item
                         </th>
+                        <th className="px-2 py-2 font-semibold">SO #</th>
                         <th className="px-2 py-2 font-semibold">Material</th>
                         <th className="w-24 px-5 py-2 text-right font-semibold print:pr-[10mm]">
                           Qty
@@ -2185,7 +2207,7 @@ export default function DeliveryNoteDetailPage() {
                       {detail.lines.length === 0 ? (
                         <tr>
                           <td
-                            colSpan={3}
+                            colSpan={4}
                             className="px-5 py-8 text-center text-slate-500"
                           >
                             No lines.
@@ -2199,6 +2221,9 @@ export default function DeliveryNoteDetailPage() {
                           >
                             <td className="px-5 py-2 font-mono text-xs tabular-nums text-slate-500 print:pl-[10mm] dark:text-slate-400">
                               {l.doc_item}
+                            </td>
+                            <td className="px-2 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">
+                              {l.so_number?.trim() || "—"}
                             </td>
                             <td className="px-2 py-2">
                               <span className="font-mono text-xs text-slate-600 dark:text-slate-300">

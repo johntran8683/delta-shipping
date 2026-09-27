@@ -59,6 +59,10 @@ type DeliveryNoteRow = {
   projected_ship_date: string | null;
   shipping_type: string | null;
   ship_to_region_state: string | null;
+  /** Distinct SO numbers pulled from the DN's lines. */
+  so_numbers: string[];
+  customer_po: string | null;
+  po_date: string | null;
   /** Other open DNs globally that share ship-with grouping keys (picker hint only). */
   ship_together_other_count: number;
 };
@@ -1717,6 +1721,42 @@ function DeliveryNotesContent() {
                               title={r.shipping_type ?? undefined}
                             >
                               {r.shipping_type ?? "—"}
+                            </td>
+                          );
+                        }
+                        if (col.key === "so_number") {
+                          const soDisplay =
+                            r.so_numbers.length > 0
+                              ? r.so_numbers.join(", ")
+                              : null;
+                          return (
+                            <td
+                              key={col.key}
+                              className="max-w-[10rem] truncate whitespace-nowrap px-3 py-1.5 font-mono text-xs text-slate-600 dark:text-slate-300"
+                              title={soDisplay ?? undefined}
+                            >
+                              {soDisplay ?? "—"}
+                            </td>
+                          );
+                        }
+                        if (col.key === "customer_po") {
+                          return (
+                            <td
+                              key={col.key}
+                              className="max-w-[10rem] truncate whitespace-nowrap px-3 py-1.5 font-mono text-xs text-slate-600 dark:text-slate-300"
+                              title={r.customer_po ?? undefined}
+                            >
+                              {r.customer_po?.trim() || "—"}
+                            </td>
+                          );
+                        }
+                        if (col.key === "po_date") {
+                          return (
+                            <td
+                              key={col.key}
+                              className="whitespace-nowrap px-3 py-1.5 tabular-nums text-slate-600 dark:text-slate-300"
+                            >
+                              {formatDate(r.po_date)}
                             </td>
                           );
                         }

@@ -304,6 +304,26 @@ export class DeliveryNotesService {
     const peerCountsById = await this.getShipmentCombinePeerCountsByIds(
       rows.map((r) => r.id),
     );
+    /** Distinct SO numbers per DN, from lines (a DN can carry several SOs). */
+    const soNumberById = new Map<string, string[]>();
+    if (rows.length > 0) {
+      const soRows = await this.prisma.deliveryNoteLine.findMany({
+        where: {
+          delivery_note_id: { in: rows.map((r) => r.id) },
+          so_number: { not: null },
+        },
+        select: { delivery_note_id: true, so_number: true },
+        distinct: ['delivery_note_id', 'so_number'],
+      });
+      for (const soRow of soRows) {
+        const so = soRow.so_number?.trim();
+        if (!so) continue;
+        const arr = soNumberById.get(soRow.delivery_note_id) ?? [];
+        if (!arr.includes(so)) arr.push(so);
+        soNumberById.set(soRow.delivery_note_id, arr);
+      }
+      for (const arr of soNumberById.values()) arr.sort();
+    }
     const mapped = rows.map((row) => {
       const joinedShipTo =
         shipToByCompositeCode.get(
@@ -336,6 +356,8 @@ export class DeliveryNotesService {
         ship_to_address: shipToDisplayName || row.ship_to_code,
         ship_to_street: shipToStreet,
         ship_together_other_count: peerCountsById.get(row.id) ?? 0,
+        /** Distinct SO numbers pulled from the DN's lines (line-level field). */
+        so_numbers: soNumberById.get(row.id) ?? [],
       };
     });
 
