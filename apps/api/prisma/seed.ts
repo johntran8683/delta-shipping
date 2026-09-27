@@ -32,6 +32,26 @@ async function ensureCsaRole() {
   });
 }
 
+/** Ensure TEAM_LEAD exists on DBs created before it was added. */
+async function ensureTeamLeadRole() {
+  await prisma.role.upsert({
+    where: { code: 'TEAM_LEAD' },
+    create: {
+      code: 'TEAM_LEAD',
+      name: 'Team Lead',
+      description: 'Delivery note supervision: hold, cancel, resume, rush',
+      sort_order: 12,
+      is_active: true,
+    },
+    update: {
+      name: 'Team Lead',
+      description: 'Delivery note supervision: hold, cancel, resume, rush',
+      sort_order: 12,
+      is_active: true,
+    },
+  });
+}
+
 async function seedPermissions() {
   for (const entry of PERMISSION_MANIFEST) {
     await prisma.permission.upsert({
@@ -41,7 +61,9 @@ async function seedPermissions() {
     });
   }
 
-  for (const [roleCode, permCodes] of Object.entries(ROLE_PERMISSION_DEFAULTS)) {
+  for (const [roleCode, permCodes] of Object.entries(
+    ROLE_PERMISSION_DEFAULTS,
+  )) {
     const role = await prisma.role.findUnique({ where: { code: roleCode } });
     if (!role) {
       console.warn(`Role ${roleCode} missing; skip permission wiring.`);
@@ -110,16 +132,12 @@ async function seedAdminIfNeeded() {
     },
   });
 
-  console.log(
-    'Seeded admin user (all operational roles for dev):',
-    email,
-  );
+  console.log('Seeded admin user (all operational roles for dev):', email);
 }
 
 /** PICKER + PACKER + SHIPPER only — triggers web “choose role” after login. */
 async function seedMultiRoleTestUserIfNeeded() {
-  const email =
-    process.env.SEED_MULTI_ROLE_USER_EMAIL ?? 'user@example.com';
+  const email = process.env.SEED_MULTI_ROLE_USER_EMAIL ?? 'user@example.com';
   const password =
     process.env.SEED_MULTI_ROLE_USER_PASSWORD ?? 'ChangeMeUser123!';
   const hash = await bcrypt.hash(password, 10);
@@ -152,14 +170,12 @@ async function seedMultiRoleTestUserIfNeeded() {
     },
   });
 
-  console.log(
-    'Seeded multi-role test user (PICKER, PACKER, SHIPPER):',
-    email,
-  );
+  console.log('Seeded multi-role test user (PICKER, PACKER, SHIPPER):', email);
 }
 
 async function main() {
   await ensureCsaRole();
+  await ensureTeamLeadRole();
   await seedPermissions();
   await seedAdminIfNeeded();
   await seedMultiRoleTestUserIfNeeded();

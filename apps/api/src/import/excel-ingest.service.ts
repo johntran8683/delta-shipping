@@ -378,7 +378,8 @@ export class ExcelIngestService {
       };
 
       const nextStart = await this.computeNextNewPriority();
-      let nextNewPriority = nextStart;
+      // All new notes in this batch share the same priority (yesterday's max + 1).
+      const batchPriority = nextStart;
 
       for (const [dnNumber, group] of byDn) {
         const sorted = [...group].sort((a, b) => a.excelRow - b.excelRow);
@@ -423,11 +424,7 @@ export class ExcelIngestService {
               header,
               sold: sold ?? '',
               ship: ship ?? '',
-              getNextNewPriority: () => {
-                const p = nextNewPriority;
-                nextNewPriority += 1;
-                return p;
-              },
+              getNextNewPriority: () => batchPriority,
               actorUserId,
               actorRoleId,
               lineTouched,
@@ -754,10 +751,6 @@ export class ExcelIngestService {
       where: { dn_number: dnNumber },
     });
 
-    if (existing) {
-      return 'existing';
-    }
-
     const hf = this.extractHeaderFields(header);
     const { customer, shipToLocation } = await this.ensureCustomerAndShipTo(
       tx,
@@ -765,6 +758,43 @@ export class ExcelIngestService {
       sold,
       ship,
     );
+
+    if (existing) {
+      // Refresh data fields from the import; preserve workflow state
+      // (status, priority, owners, open flag).
+      await tx.deliveryNote.update({
+        where: { id: existing.id },
+        data: {
+          sold_to_code: sold,
+          ship_to_code: ship,
+          customer_id: customer.id,
+          ship_to_location_id: shipToLocation.id,
+          last_seen_import_batch_id: batchId,
+          credit_status: hf.credit_status,
+          shipping_type: hf.shipping_type,
+          currency_code: hf.currency_code,
+          dn_create_date: hf.dn_create_date,
+          requested_delivery_date: hf.requested_delivery_date,
+          projected_ship_date: hf.projected_ship_date,
+          po_date: hf.po_date,
+          customer_po: hf.customer_po,
+          ship_to_region_state: hf.ship_to_region_state,
+        },
+      });
+      const headerExcelRowExisting = group[0]!.excelRow;
+      for (const ctx of group) {
+        await this.upsertLine(
+          tx,
+          existing.id,
+          ctx,
+          sheetName,
+          batchId,
+          lineTouched,
+          headerExcelRowExisting,
+        );
+      }
+      return 'existing';
+    }
 
     const prio =
       hf.current_priority_no != null && hf.current_priority_no >= 1
@@ -779,7 +809,8 @@ export class ExcelIngestService {
         customer_id: customer.id,
         ship_to_location_id: shipToLocation.id,
         last_seen_import_batch_id: batchId,
-        current_status: dn_status.IMPORTED,
+        created_by_import_batch_id: batchId,
+        current_status: dn_status.NEW,
         current_priority_no: prio,
         is_open: true,
         credit_status: hf.credit_status,
@@ -798,7 +829,7 @@ export class ExcelIngestService {
       data: {
         delivery_note_id: dn.id,
         from_status: null,
-        to_status: dn_status.IMPORTED,
+        to_status: dn_status.NEW,
         message: `Imported from Excel (${sheetName})`,
         actor_user_id: actorUserId,
         actor_role_id: actorRoleId,

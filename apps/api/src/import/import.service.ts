@@ -409,7 +409,7 @@ export class ImportService {
    * Undo one Excel import: removes delivery notes whose **last** touch was this batch,
    * then deletes the import batch record (and row errors). Same auth rules as import.
    */
-  async revertImportBatch(batchId: string, payload: JwtPayload) {
+  async revertImportBatch(batchId: string, payload: JwtPayload, force = false) {
     const canImport = await this.permissions.roleHasPermission(
       payload.activeRoleId,
       'import.daily_dn',
@@ -436,9 +436,51 @@ export class ImportService {
       );
     }
 
+    // Find all notes touched by this batch.
+    const touched = await this.prisma.deliveryNote.findMany({
+      where: { last_seen_import_batch_id: batchId },
+      select: {
+        id: true,
+        dn_number: true,
+        current_status: true,
+        created_by_import_batch_id: true,
+        updated_at: true,
+      },
+    });
+
+    const createdByBatch = touched.filter(
+      (n) => n.created_by_import_batch_id === batchId,
+    );
+    const updatedByBatch = touched.filter(
+      (n) => n.created_by_import_batch_id !== batchId,
+    );
+
+    // A note "changed" if it left NEW status or was modified after the import.
+    const batchTime = batch.completed_at ?? batch.started_at;
+    const changed = createdByBatch.filter(
+      (n) => n.current_status !== 'NEW' || n.updated_at > batchTime,
+    );
+
+    if (changed.length > 0 && !force) {
+      // Warn: let the supervisor choose whether to proceed.
+      return {
+        importBatchId: batchId,
+        fileName: batch.file_name,
+        requiresConfirmation: true,
+        changedNotes: changed.map((n) => ({
+          id: n.id,
+          dn_number: n.dn_number,
+          current_status: n.current_status,
+        })),
+        createdCount: createdByBatch.length,
+        updatedCount: updatedByBatch.length,
+      };
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
+      // Delete notes created by this batch.
       const dnResult = await tx.deliveryNote.deleteMany({
-        where: { last_seen_import_batch_id: batchId },
+        where: { created_by_import_batch_id: batchId },
       });
       await tx.importBatch.delete({
         where: { id: batchId },
@@ -454,6 +496,14 @@ export class ImportService {
       importBatchId: batchId,
       deletedDeliveryNotes: result,
       fileName: batch.file_name,
+      requiresConfirmation: false,
+      // Pre-existing notes that were refreshed by this import; re-import the
+      // correct file to restore their data.
+      refreshedExistingNotes: updatedByBatch.map((n) => ({
+        id: n.id,
+        dn_number: n.dn_number,
+        current_status: n.current_status,
+      })),
     };
   }
 }

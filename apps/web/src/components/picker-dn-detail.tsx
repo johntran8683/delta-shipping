@@ -95,7 +95,7 @@ function pickProgressFromStatus(status: string): {
       caption: "Ready for packing — the packer takes over from here.",
     };
   }
-  if (s === "IMPORTED" || s === "PRIORITIZED") {
+  if (s === "NEW") {
     return {
       steps: ["current", "upcoming", "upcoming"],
       trackFillPercent: 16.66,

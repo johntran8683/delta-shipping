@@ -1,7 +1,6 @@
 /** Mirrors API `dn_status` enum for filter dropdowns (web package does not import Prisma). */
 export const DN_STATUS_OPTIONS = [
-  "IMPORTED",
-  "PRIORITIZED",
+  "NEW",
   "PICKING",
   "PICKED",
   "PACKING",

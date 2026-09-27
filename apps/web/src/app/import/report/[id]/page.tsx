@@ -224,7 +224,27 @@ export default function ImportReportPage() {
         router.replace("/login");
         return;
       }
-      if (!res.ok) {
+      if (body.requiresConfirmation) {
+        const changedList = (body.changedNotes ?? [])
+          .map((n: { dn_number: string; current_status: string }) => `  • ${n.dn_number} (${n.current_status})`)
+          .join("\n");
+        const confirmed = window.confirm(
+          `Warning: ${body.changedNotes?.length ?? 0} note(s) have changed since this import:\n\n${changedList}\n\n${body.createdCount} note(s) were created by this import and will be deleted.\n${body.updatedCount} existing note(s) were refreshed.\n\nClick OK to revert anyway, or Cancel to stop.`,
+        );
+        if (confirmed) {
+          const res2 = await fetch(`${apiBase}/import/batches/${id}?force=true`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const body2 = await res2.json().catch(() => ({}));
+          if (!res2.ok) {
+            setError(formatApiErrorPayload(body2));
+            return;
+          }
+        } else {
+          return;
+        }
+      } else if (!res.ok) {
         setError(formatApiErrorPayload(body));
         return;
       }

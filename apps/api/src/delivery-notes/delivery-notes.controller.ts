@@ -163,6 +163,7 @@ export class DeliveryNotesController {
       payload,
       dto.message,
       dto.trackingNumber,
+      dto.confirmDoubleClaim,
     );
   }
 

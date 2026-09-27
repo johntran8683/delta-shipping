@@ -91,6 +91,7 @@ type Detail = {
   is_rushed: boolean;
   latest_rush_reason?: string | null;
   current_status: string;
+  on_hold_from_status?: string | null;
   is_open: boolean;
   shipping_type: string | null;
   currency_code: string | null;
@@ -1238,19 +1239,24 @@ export default function DeliveryNoteDetailPage() {
 
   async function runStatusTransition(
     toStatus: string,
-    opts?: { trackingNumber?: string; message?: string },
+    opts?: { trackingNumber?: string; message?: string; confirmDoubleClaim?: boolean },
   ): Promise<boolean> {
     const token = getAccessToken();
     if (!token) return false;
     setBusy(true);
     setError(null);
     try {
-      const body: { toStatus: string; trackingNumber?: string; message?: string } =
-        { toStatus };
+      const body: {
+        toStatus: string;
+        trackingNumber?: string;
+        message?: string;
+        confirmDoubleClaim?: boolean;
+      } = { toStatus };
       const trimmedTracking = opts?.trackingNumber?.trim();
       if (trimmedTracking) body.trackingNumber = trimmedTracking;
       const trimmedMessage = opts?.message?.trim();
       if (trimmedMessage) body.message = trimmedMessage;
+      if (opts?.confirmDoubleClaim) body.confirmDoubleClaim = true;
       const res = await fetch(`${apiBase}/delivery-notes/${id}/transition`, {
         method: "POST",
         headers: authHeaders(),
@@ -1260,6 +1266,18 @@ export default function DeliveryNoteDetailPage() {
       if (res.status === 401) {
         clearSession();
         router.replace("/login");
+        return false;
+      }
+      if (data.requiresConfirmation) {
+        const confirmed = window.confirm(
+          `${data.warning ?? "You already have a note in progress."}\n\nClick OK to proceed anyway, or Cancel to stop.`,
+        );
+        if (confirmed) {
+          return runStatusTransition(toStatus, {
+            ...opts,
+            confirmDoubleClaim: true,
+          });
+        }
         return false;
       }
       if (!res.ok) {
@@ -1461,22 +1479,31 @@ export default function DeliveryNoteDetailPage() {
 
   async function packStartRequest(
     peerIds: string[],
+    confirmDoubleClaim = false,
   ): Promise<
     | { ok: true; detail: Detail }
     | { ok: false; message: string }
+    | { ok: false; requiresConfirmation: true; warning: string }
   > {
     const token = getAccessToken();
     if (!token) return { ok: false, message: "Not signed in" };
     const res = await fetch(`${apiBase}/delivery-notes/${id}/pack/start`, {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ peerDeliveryNoteIds: peerIds }),
+      body: JSON.stringify({ peerDeliveryNoteIds: peerIds, confirmDoubleClaim }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) {
       clearSession();
       router.replace("/login");
       return { ok: false, message: "Session expired" };
+    }
+    if (data.requiresConfirmation) {
+      return {
+        ok: false,
+        requiresConfirmation: true,
+        warning: data.warning ?? "You already have a note in progress.",
+      };
     }
     if (!res.ok) {
       return {
@@ -1648,6 +1675,24 @@ export default function DeliveryNoteDetailPage() {
     try {
       const r = await packStartRequest(peerIds);
       if (!r.ok) {
+        if ("requiresConfirmation" in r) {
+          // Show warning; user can confirm to proceed.
+          const confirmed = window.confirm(
+            `${r.warning}\n\nClick OK to start packing anyway, or Cancel to stop.`,
+          );
+          if (confirmed) {
+            const r2 = await packStartRequest(peerIds, true);
+            if (!r2.ok) {
+              setStartPackingSaveError(
+                "message" in r2 ? r2.message : "Failed to start packing",
+              );
+              return;
+            }
+            setDetail(r2.detail);
+            closeStartPackingDialog();
+          }
+          return;
+        }
         setStartPackingSaveError(r.message);
         return;
       }
@@ -1861,6 +1906,7 @@ export default function DeliveryNoteDetailPage() {
           <div className="shrink-0">
           <SupervisorDnControls
             currentStatus={detail.current_status}
+            onHoldFromStatus={detail.on_hold_from_status}
             isOpen={detail.is_open}
             isRushed={detail.is_rushed}
             storedRushReason={detail.latest_rush_reason}

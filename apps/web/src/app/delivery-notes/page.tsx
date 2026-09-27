@@ -148,6 +148,8 @@ function DeliveryNotesContent() {
     DEFAULT_VISIBLE_COLUMNS,
   );
   const [myPickingOnly, setMyPickingOnly] = useState(false);
+  const [readyToPackOnly, setReadyToPackOnly] = useState(false);
+  const [readyToShipOnly, setReadyToShipOnly] = useState(false);
   const [pickerChosen, setPickerChosen] = useState<PickerChosenDn[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [pickerQuickDn, setPickerQuickDn] = useState("");
@@ -222,7 +224,7 @@ function DeliveryNotesContent() {
     pickerChosenFresh.length > 0 &&
     pickerChosenFresh.every((c) => {
       const st = normDnStatus(c.current_status);
-      return st === "PRIORITIZED" || st === "IMPORTED";
+      return st === "NEW";
     });
 
   const canBulkMarkPicked =
@@ -283,6 +285,8 @@ function DeliveryNotesContent() {
       customerFilter?: string;
       shipToFilter?: string;
       myPickingOnly?: boolean;
+      readyToPackOnly?: boolean;
+      readyToShipOnly?: boolean;
       sortBy?: DeliveryNoteSortField;
       sortDir?: DeliveryNoteSortDir;
     },
@@ -296,6 +300,8 @@ function DeliveryNotesContent() {
     const custF = q?.customerFilter ?? customerFilter;
     const shipF = q?.shipToFilter ?? shipToFilter;
     const myPick = q?.myPickingOnly ?? myPickingOnly;
+    const packOnly = q?.readyToPackOnly ?? readyToPackOnly;
+    const shipOnly = q?.readyToShipOnly ?? readyToShipOnly;
     const sortByVal = q?.sortBy ?? sortBy;
     const sortDirVal = q?.sortDir ?? sortDir;
 
@@ -303,6 +309,10 @@ function DeliveryNotesContent() {
     params.set("is_open", openF === "open" ? "true" : "false");
     if (myPick) {
       params.set("myPicking", "true");
+    } else if (packOnly) {
+      params.set("status", "PICKED");
+    } else if (shipOnly) {
+      params.set("status", "PACKED");
     } else if (statusF) {
       params.set("status", statusF);
     }
@@ -1074,8 +1084,16 @@ function DeliveryNotesContent() {
                       onChange={(e) => {
                         const next = e.target.checked;
                         setMyPickingOnly(next);
+                        if (next) {
+                          setReadyToPackOnly(false);
+                          setReadyToShipOnly(false);
+                        }
                         setPage(1);
-                        void load(1, pageSize, { myPickingOnly: next });
+                        void load(1, pageSize, {
+                          myPickingOnly: next,
+                          readyToPackOnly: false,
+                          readyToShipOnly: false,
+                        });
                       }}
                       className="peer sr-only"
                     />
@@ -1094,6 +1112,98 @@ function DeliveryNotesContent() {
                     </span>
                     <span className="mt-0.5 block text-[11px] leading-snug text-slate-500 dark:text-slate-400">
                       Table: only <span className="font-medium text-slate-600 dark:text-slate-300">PICKING</span> you started.
+                    </span>
+                  </span>
+                </label>
+
+                <label
+                  htmlFor="ready-to-pack"
+                  className="group flex max-w-md cursor-pointer items-start gap-3 rounded-lg border border-transparent p-1 transition hover:border-slate-200/80 hover:bg-slate-50/90 dark:hover:border-slate-700 dark:hover:bg-slate-900/50 sm:items-center"
+                  title="Filters the table below to PICKED notes ready to pack."
+                >
+                  <span className="relative mt-0.5 inline-flex h-6 w-10 shrink-0 sm:mt-0">
+                    <input
+                      id="ready-to-pack"
+                      type="checkbox"
+                      checked={readyToPackOnly}
+                      disabled={loading}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setReadyToPackOnly(next);
+                        if (next) {
+                          setReadyToShipOnly(false);
+                          setMyPickingOnly(false);
+                        }
+                        setPage(1);
+                        void load(1, pageSize, {
+                          readyToPackOnly: next,
+                          readyToShipOnly: false,
+                          myPickingOnly: false,
+                        });
+                      }}
+                      className="peer sr-only"
+                    />
+                    <span
+                      aria-hidden
+                      className="absolute inset-0 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-slate-400 peer-checked:bg-emerald-600 peer-disabled:opacity-40 dark:bg-slate-700 dark:peer-checked:bg-emerald-600"
+                    />
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/[0.06] transition-transform duration-200 ease-out peer-checked:translate-x-4 dark:ring-white/10"
+                    />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold text-slate-800 dark:text-slate-100">
+                      Ready to pack
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+                      Table: only <span className="font-medium text-slate-600 dark:text-slate-300">PICKED</span> notes.
+                    </span>
+                  </span>
+                </label>
+
+                <label
+                  htmlFor="ready-to-ship"
+                  className="group flex max-w-md cursor-pointer items-start gap-3 rounded-lg border border-transparent p-1 transition hover:border-slate-200/80 hover:bg-slate-50/90 dark:hover:border-slate-700 dark:hover:bg-slate-900/50 sm:items-center"
+                  title="Filters the table below to PACKED notes ready to ship."
+                >
+                  <span className="relative mt-0.5 inline-flex h-6 w-10 shrink-0 sm:mt-0">
+                    <input
+                      id="ready-to-ship"
+                      type="checkbox"
+                      checked={readyToShipOnly}
+                      disabled={loading}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setReadyToShipOnly(next);
+                        if (next) {
+                          setReadyToPackOnly(false);
+                          setMyPickingOnly(false);
+                        }
+                        setPage(1);
+                        void load(1, pageSize, {
+                          readyToShipOnly: next,
+                          readyToPackOnly: false,
+                          myPickingOnly: false,
+                        });
+                      }}
+                      className="peer sr-only"
+                    />
+                    <span
+                      aria-hidden
+                      className="absolute inset-0 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-slate-400 peer-checked:bg-emerald-600 peer-disabled:opacity-40 dark:bg-slate-700 dark:peer-checked:bg-emerald-600"
+                    />
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm ring-1 ring-black/[0.06] transition-transform duration-200 ease-out peer-checked:translate-x-4 dark:ring-white/10"
+                    />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold text-slate-800 dark:text-slate-100">
+                      Ready to ship
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+                      Table: only <span className="font-medium text-slate-600 dark:text-slate-300">PACKED</span> notes.
                     </span>
                   </span>
                 </label>

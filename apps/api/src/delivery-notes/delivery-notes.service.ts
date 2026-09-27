@@ -714,6 +714,26 @@ export class DeliveryNotesService {
     );
     const allIds = [anchorId, ...peerIds];
 
+    // Warn if the packer already has another note in PACKING (they usually
+    // work on one at a time). Not a blocker — just a warning.
+    if (!dto.confirmDoubleClaim) {
+      const inProgress = await this.prisma.deliveryNote.findFirst({
+        where: {
+          packing_started_by_user_id: payload.sub,
+          current_status: dn_status.PACKING,
+          id: { notIn: allIds },
+        },
+        select: { id: true, dn_number: true },
+      });
+      if (inProgress) {
+        return {
+          requiresConfirmation: true,
+          warning: `You are already packing ${inProgress.dn_number}. Start packing this note too?`,
+          inProgressNote: inProgress,
+        };
+      }
+    }
+
     await this.prisma.$transaction(async (tx) => {
       await this.assertNoOpenPackSessionForDns(tx, allIds);
 
@@ -1106,6 +1126,12 @@ export class DeliveryNotesService {
         picking_started_by: {
           select: { id: true, email: true, display_name: true },
         },
+        packing_started_by: {
+          select: { id: true, email: true, display_name: true },
+        },
+        shipping_started_by: {
+          select: { id: true, email: true, display_name: true },
+        },
         lines: {
           orderBy: { doc_item: 'asc' },
         },
@@ -1235,7 +1261,27 @@ export class DeliveryNotesService {
     payload: JwtPayload,
     message?: string,
     trackingNumber?: string,
+    confirmDoubleClaim?: boolean,
   ) {
+    // Warn if the shipper already has another note in SHIPPING_IN_PROGRESS.
+    if (toStatus === dn_status.SHIPPING_IN_PROGRESS && !confirmDoubleClaim) {
+      const inProgress = await this.prisma.deliveryNote.findFirst({
+        where: {
+          shipping_started_by_user_id: payload.sub,
+          current_status: dn_status.SHIPPING_IN_PROGRESS,
+          id: { not: id },
+        },
+        select: { id: true, dn_number: true },
+      });
+      if (inProgress) {
+        return {
+          requiresConfirmation: true,
+          warning: `You are already shipping ${inProgress.dn_number}. Start shipping this note too?`,
+          inProgressNote: inProgress,
+        };
+      }
+    }
+
     await this.prisma.$transaction(async (tx) => {
       await this.applyShipGroupTransition(
         tx,
@@ -1600,21 +1646,38 @@ export class DeliveryNotesService {
     const isOpen =
       toStatus === dn_status.SHIPPED || toStatus === dn_status.CANCELLED
         ? false
-        : toStatus === dn_status.PRIORITIZED &&
-            fromStatus === dn_status.CANCELLED
-          ? true
-          : dn.is_open;
+        : dn.is_open;
     const pickingUpdate = this.pickingClaimUpdate(
       fromStatus,
       toStatus,
       payload.sub,
     );
+    const packingUpdate = this.packingClaimUpdate(
+      fromStatus,
+      toStatus,
+      payload.sub,
+    );
+    const shippingUpdate = this.shippingClaimUpdate(
+      fromStatus,
+      toStatus,
+      payload.sub,
+    );
+    // On-hold: remember where the note was so it can resume there.
+    const onHoldUpdate =
+      toStatus === dn_status.ON_HOLD
+        ? { on_hold_from_status: fromStatus }
+        : fromStatus === dn_status.ON_HOLD
+          ? { on_hold_from_status: null }
+          : {};
     await tx.deliveryNote.update({
       where: { id: dnId },
       data: {
         current_status: toStatus,
         is_open: isOpen,
         ...pickingUpdate,
+        ...packingUpdate,
+        ...shippingUpdate,
+        ...onHoldUpdate,
       },
     });
     await tx.dnStatusHistory.create({
@@ -1668,17 +1731,17 @@ export class DeliveryNotesService {
     }
 
     const role = await this.getActiveRole(payload);
-    if (!meta.allowedRoles.includes(role.code)) {
+    // Flexible permissions: check ALL roles assigned to the user, not just
+    // the active one. The active role only controls which view is shown.
+    const hasAccess = await this.userHasTransitionAccess(
+      payload.sub,
+      meta.allowedRoles,
+      meta.permission,
+    );
+    if (!hasAccess) {
       throw new ForbiddenException(
         `Role ${role.code} cannot perform this transition`,
       );
-    }
-    const hasPerm = await this.permissions.roleHasPermission(
-      payload.activeRoleId,
-      meta.permission,
-    );
-    if (!hasPerm) {
-      throw new ForbiddenException(`Missing permission: ${meta.permission}`);
     }
 
     if (from === dn_status.PICKING && toStatus === dn_status.PICKED) {
@@ -1739,6 +1802,34 @@ export class DeliveryNotesService {
     }
     if (from === dn_status.PICKING) {
       return { picking_started_by_user_id: null };
+    }
+    return {};
+  }
+
+  private packingClaimUpdate(
+    from: dn_status,
+    to: dn_status,
+    userId: string,
+  ): { packing_started_by_user_id: string | null } | Record<string, never> {
+    if (to === dn_status.PACKING) {
+      return { packing_started_by_user_id: userId };
+    }
+    if (from === dn_status.PACKING) {
+      return { packing_started_by_user_id: null };
+    }
+    return {};
+  }
+
+  private shippingClaimUpdate(
+    from: dn_status,
+    to: dn_status,
+    userId: string,
+  ): { shipping_started_by_user_id: string | null } | Record<string, never> {
+    if (to === dn_status.SHIPPING_IN_PROGRESS) {
+      return { shipping_started_by_user_id: userId };
+    }
+    if (from === dn_status.SHIPPING_IN_PROGRESS) {
+      return { shipping_started_by_user_id: null };
     }
     return {};
   }
@@ -1860,6 +1951,30 @@ export class DeliveryNotesService {
       throw new ForbiddenException('Active role not found');
     }
     return role;
+  }
+
+  /**
+   * Flexible permission check: the user may perform the transition if ANY of
+   * their assigned roles is in allowedRoles AND has the required permission.
+   */
+  private async userHasTransitionAccess(
+    userId: string,
+    allowedRoles: string[],
+    permission: string,
+  ): Promise<boolean> {
+    const userRoles = await this.prisma.userRole.findMany({
+      where: { user_id: userId },
+      include: { role: true },
+    });
+    for (const ur of userRoles) {
+      if (!allowedRoles.includes(ur.role.code)) continue;
+      const hasPerm = await this.permissions.roleHasPermission(
+        ur.role_id,
+        permission,
+      );
+      if (hasPerm) return true;
+    }
+    return false;
   }
 
   private async computeAllowedNextStatuses(

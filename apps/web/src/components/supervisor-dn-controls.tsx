@@ -17,7 +17,7 @@ const btnDanger =
 const inputClass =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none ring-0 placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
 
-type SupervisorStatusTarget = "ON_HOLD" | "CANCELLED" | "PRIORITIZED";
+type SupervisorStatusTarget = "ON_HOLD" | "CANCELLED" | "RESUME";
 
 const STATUS_ACTION: Record<
   SupervisorStatusTarget,
@@ -44,16 +44,16 @@ const STATUS_ACTION: Record<
     shortLabel: "Cancel DN",
     title: "Cancel delivery note",
     description:
-      "This marks the delivery note as cancelled. A reason is required for the audit trail.",
+      "This marks the delivery note as cancelled. This cannot be undone. A reason is required for the audit trail.",
     confirm: "Cancel delivery note",
     variant: "danger",
   },
-  PRIORITIZED: {
-    label: "Resume in queue",
+  RESUME: {
+    label: "Resume",
     shortLabel: "Resume",
-    title: "Resume in queue",
+    title: "Resume delivery note",
     description:
-      "Returns the note to the prioritized queue. A reason is required for the audit trail.",
+      "Returns the note to the status it was in before being put on hold. A reason is required for the audit trail.",
     confirm: "Resume",
     variant: "default",
   },
@@ -65,17 +65,16 @@ function normStatus(s: string): string {
     .toUpperCase();
 }
 
-/** Contextual primary workflow action (Option B). */
+/** Contextual primary workflow action. */
 function primaryWorkflowAction(
   allowed: Set<string>,
   currentStatus: string,
+  onHoldFromStatus: string | null,
 ): SupervisorStatusTarget | null {
   const status = normStatus(currentStatus);
-  if (
-    allowed.has("PRIORITIZED") &&
-    (status === "ON_HOLD" || status === "CANCELLED")
-  ) {
-    return "PRIORITIZED";
+  // Resume is available when on hold and we know where to resume to.
+  if (status === "ON_HOLD" && onHoldFromStatus) {
+    return "RESUME";
   }
   if (
     allowed.has("ON_HOLD") &&
@@ -85,25 +84,31 @@ function primaryWorkflowAction(
   ) {
     return "ON_HOLD";
   }
-  if (allowed.has("PRIORITIZED")) return "PRIORITIZED";
-  if (allowed.has("ON_HOLD")) return "ON_HOLD";
   return null;
 }
 
 function workflowSecondaryActions(
   allowed: Set<string>,
   primary: SupervisorStatusTarget | null,
+  currentStatus: string,
 ): SupervisorStatusTarget[] {
   const out: SupervisorStatusTarget[] = [];
-  for (const target of ["PRIORITIZED", "ON_HOLD"] as const) {
-    if (!allowed.has(target) || target === primary) continue;
-    out.push(target);
+  const status = normStatus(currentStatus);
+  // Cancel is available as a secondary action (not for shipped/cancelled).
+  if (
+    allowed.has("CANCELLED") &&
+    status !== "CANCELLED" &&
+    status !== "SHIPPED" &&
+    "CANCELLED" !== primary
+  ) {
+    out.push("CANCELLED");
   }
   return out;
 }
 
 export type SupervisorDnControlsProps = {
   currentStatus: string;
+  onHoldFromStatus?: string | null;
   isOpen: boolean;
   isRushed: boolean;
   storedRushReason?: string | null;
@@ -220,13 +225,22 @@ export function SupervisorDnControls({
   onPrintPoLabel,
   statusHistory,
   completedPackSessions,
+  onHoldFromStatus,
 }: SupervisorDnControlsProps) {
   const allowed = new Set(
     allowedNextStatuses.map((s) => s.trim().toUpperCase()),
   );
   const statusNorm = normStatus(currentStatus);
-  const primaryWorkflow = primaryWorkflowAction(allowed, currentStatus);
-  const secondaryWorkflow = workflowSecondaryActions(allowed, primaryWorkflow);
+  const primaryWorkflow = primaryWorkflowAction(
+    allowed,
+    currentStatus,
+    onHoldFromStatus ?? null,
+  );
+  const secondaryWorkflow = workflowSecondaryActions(
+    allowed,
+    primaryWorkflow,
+    currentStatus,
+  );
   const canCancel = allowed.has("CANCELLED");
 
   const hasWorkflowPanel =
@@ -279,7 +293,10 @@ export function SupervisorDnControls({
       return;
     }
     setStatusError(null);
-    const ok = await onTransition(statusTarget, msg);
+    // RESUME translates to the stored on-hold-from status.
+    const actualTarget =
+      statusTarget === "RESUME" ? (onHoldFromStatus ?? "NEW") : statusTarget;
+    const ok = await onTransition(actualTarget, msg);
     if (ok) closeStatus();
   }
 

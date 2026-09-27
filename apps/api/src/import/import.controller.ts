@@ -95,8 +95,13 @@ export class ImportController {
   @RequirePermissions('import.daily_dn')
   revertBatch(
     @Param('id', ParseUUIDPipe) id: string,
+    @Query('force') force: string | undefined,
     @CurrentPayload() payload: JwtPayload,
   ) {
-    return this.importService.revertImportBatch(id, payload);
+    return this.importService.revertImportBatch(
+      id,
+      payload,
+      force === 'true',
+    );
   }
 }

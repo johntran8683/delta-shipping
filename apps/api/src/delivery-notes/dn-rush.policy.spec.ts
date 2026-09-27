@@ -6,7 +6,7 @@ import {
 
 describe('deliveryNoteEligibleForRush', () => {
   it('allows open prioritized notes', () => {
-    expect(deliveryNoteEligibleForRush(dn_status.PRIORITIZED, true)).toBe(true);
+    expect(deliveryNoteEligibleForRush(dn_status.NEW, true)).toBe(true);
   });
 
   it('blocks cancelled, on hold, and closed', () => {

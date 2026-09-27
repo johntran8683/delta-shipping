@@ -11,8 +11,7 @@ datasource db {
 }
 
 enum dn_status {
-  IMPORTED
-  PRIORITIZED
+  NEW
   PICKING
   PICKED
   PACKING
@@ -101,6 +100,8 @@ model User {
   dn_rush_history          DnRushHistory[]
   shipments              Shipment[]
   picking_claimed_delivery_notes DeliveryNote[] @relation("PickingStartedBy")
+  packing_claimed_delivery_notes DeliveryNote[] @relation("PackingStartedBy")
+  shipping_claimed_delivery_notes DeliveryNote[] @relation("ShippingStartedBy")
   pack_sessions_created          PackSession[]
 
   @@map("users")
@@ -147,7 +148,8 @@ model ImportBatch {
 
   creator          User?             @relation(fields: [created_by], references: [id], onDelete: SetNull)
   row_errors       ImportRowError[]
-  delivery_notes   DeliveryNote[]
+  delivery_notes   DeliveryNote[] @relation("LastSeenBatch")
+  created_delivery_notes DeliveryNote[] @relation("CreatedByBatch")
 
   @@map("import_batches")
 }
@@ -245,7 +247,7 @@ model DeliveryNote {
   current_priority_no      Int?
   is_rushed                Boolean   @default(false)
   latest_rush_reason       String?
-  current_status           dn_status @default(IMPORTED)
+  current_status           dn_status @default(NEW)
   credit_status            String?   @db.VarChar(10)
   shipping_type            String?   @db.VarChar(120)
   currency_code            String?   @db.VarChar(10)
@@ -256,7 +258,13 @@ model DeliveryNote {
   customer_po              String?   @db.VarChar(80)
   ship_to_region_state     String?   @db.VarChar(120)
   picking_started_by_user_id String? @db.Uuid
+  packing_started_by_user_id String? @db.Uuid
+  shipping_started_by_user_id String? @db.Uuid
+  /// Status the note was in before being put ON_HOLD (for resume).
+  on_hold_from_status      dn_status?
   last_seen_import_batch_id String   @db.Uuid
+  /// Batch that created this note (null for pre-existing/manual notes).
+  created_by_import_batch_id String? @db.Uuid
   is_open                  Boolean   @default(true)
   created_at               DateTime  @default(now())
   updated_at               DateTime  @updatedAt
@@ -264,7 +272,10 @@ model DeliveryNote {
   customer              Customer?      @relation(fields: [customer_id], references: [id], onDelete: Restrict)
   ship_to_location      ShipToLocation? @relation(fields: [ship_to_location_id], references: [id], onDelete: Restrict)
   picking_started_by    User?          @relation("PickingStartedBy", fields: [picking_started_by_user_id], references: [id], onDelete: SetNull)
-  last_seen_import_batch ImportBatch @relation(fields: [last_seen_import_batch_id], references: [id], onDelete: Restrict)
+  packing_started_by    User?          @relation("PackingStartedBy", fields: [packing_started_by_user_id], references: [id], onDelete: SetNull)
+  shipping_started_by   User?          @relation("ShippingStartedBy", fields: [shipping_started_by_user_id], references: [id], onDelete: SetNull)
+  last_seen_import_batch ImportBatch @relation("LastSeenBatch", fields: [last_seen_import_batch_id], references: [id], onDelete: Restrict)
+  created_by_import_batch ImportBatch? @relation("CreatedByBatch", fields: [created_by_import_batch_id], references: [id], onDelete: SetNull)
   lines                 DeliveryNoteLine[]
   status_history        DnStatusHistory[]
   priority_history      DnPriorityHistory[]

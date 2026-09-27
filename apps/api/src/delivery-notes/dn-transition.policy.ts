@@ -5,8 +5,13 @@ export type TransitionMeta = {
   allowedRoles: string[];
 };
 
+/** Roles that may supervise delivery notes (hold/cancel/resume/rush). */
+export const SUPERVISING_ROLES = ['SUPERVISOR', 'TEAM_LEAD', 'CSA'] as const;
+
 /**
- * Maps (from,to) to required permission + allowed active role codes (spec §2.2–2.3).
+ * Maps (from,to) to required permission + allowed role codes.
+ * Permissions are checked against ALL roles assigned to the user (flexible),
+ * not just the active role — the active role only controls which view is shown.
  */
 export function getTransitionMeta(
   from: dn_status,
@@ -18,7 +23,7 @@ export function getTransitionMeta(
     if (from === dn_status.SHIPPED || from === dn_status.CANCELLED) return null;
     return {
       permission: 'dn.status.supervise',
-      allowedRoles: ['SUPERVISOR'],
+      allowedRoles: [...SUPERVISING_ROLES],
     };
   }
 
@@ -26,34 +31,35 @@ export function getTransitionMeta(
     if (from === dn_status.CANCELLED || from === dn_status.SHIPPED) return null;
     return {
       permission: 'dn.status.supervise',
-      allowedRoles: ['SUPERVISOR'],
+      allowedRoles: [...SUPERVISING_ROLES],
     };
   }
 
-  if (from === dn_status.CANCELLED && to === dn_status.PRIORITIZED) {
-    return {
-      permission: 'dn.status.supervise',
-      allowedRoles: ['SUPERVISOR'],
-    };
+  if (from === dn_status.ON_HOLD) {
+    // Resume to the status the note was in before being held.
+    // The service resolves the target from on_hold_from_status.
+    const resumable: dn_status[] = [
+      dn_status.NEW,
+      dn_status.PICKING,
+      dn_status.PICKED,
+      dn_status.PACKING,
+      dn_status.PACKED,
+      dn_status.SHIPPING_IN_PROGRESS,
+    ];
+    if (resumable.includes(to)) {
+      return {
+        permission: 'dn.status.supervise',
+        allowedRoles: [...SUPERVISING_ROLES],
+      };
+    }
+    return null;
   }
 
-  if (from === dn_status.ON_HOLD && to === dn_status.PRIORITIZED) {
-    return {
-      permission: 'dn.status.supervise',
-      allowedRoles: ['SUPERVISOR'],
-    };
-  }
+  // Cancelled is terminal — no reopening.
+  if (from === dn_status.CANCELLED) return null;
 
   const chain: [dn_status, dn_status, string, string[]][] = [
-    [
-      dn_status.IMPORTED,
-      dn_status.PRIORITIZED,
-      'dn.status.supervise',
-      ['SUPERVISOR'],
-    ],
-    /** Pickers may start picking directly from import when not yet prioritized. */
-    [dn_status.IMPORTED, dn_status.PICKING, 'dn.status.pick', ['PICKER']],
-    [dn_status.PRIORITIZED, dn_status.PICKING, 'dn.status.pick', ['PICKER']],
+    [dn_status.NEW, dn_status.PICKING, 'dn.status.pick', ['PICKER']],
     [dn_status.PICKING, dn_status.PICKED, 'dn.status.pick', ['PICKER']],
     [dn_status.PICKED, dn_status.PACKING, 'dn.status.pack', ['PACKER']],
     /** Packer may undo start-packing and return to picked (leaves combined peers still packing). */
@@ -92,8 +98,7 @@ export function getTransitionMeta(
 }
 
 export const ALL_DN_STATUSES: dn_status[] = [
-  dn_status.IMPORTED,
-  dn_status.PRIORITIZED,
+  dn_status.NEW,
   dn_status.PICKING,
   dn_status.PICKED,
   dn_status.PACKING,

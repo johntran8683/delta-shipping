@@ -1,5 +1,6 @@
 import { dn_status } from '@prisma/client';
 import {
+  IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsOptional,
@@ -22,4 +23,9 @@ export class TransitionDto {
   @IsString()
   @MaxLength(80)
   trackingNumber?: string;
+
+  /** Set to true to proceed despite the double-claim warning (shipper). */
+  @IsOptional()
+  @IsBoolean()
+  confirmDoubleClaim?: boolean;
 }
