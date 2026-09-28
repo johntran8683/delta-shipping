@@ -193,6 +193,24 @@ model Customer {
   @@map("customers")
 }
 
+/// Part master (option 2, minimal): one canonical record per part number.
+/// Seeded from delivery-note line history + the item-weights spreadsheet;
+/// manual delivery-note creation adds codes missing from the table
+/// (create-only, never overwrites). The manual DN form reads this table
+/// first for description/unit-price auto-fill, falling back to line history.
+/// Codes are stored normalized (trimmed + uppercased).
+model Product {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(80)
+  description String?  @db.VarChar(255)
+  unit_price  Decimal? @db.Decimal(18, 4)
+  weight_lb   Decimal? @db.Decimal(18, 4)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@map("products")
+}
+
 model ShipToLocation {
   id            String   @id @default(uuid()) @db.Uuid
   customer_id   String   @db.Uuid

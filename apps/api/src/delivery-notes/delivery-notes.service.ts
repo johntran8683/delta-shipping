@@ -2295,6 +2295,7 @@ export class DeliveryNotesService {
       for (const row of this.manualLineRows(dn.id, dto)) {
         await tx.deliveryNoteLine.create({ data: row });
       }
+      await this.ensureProductsForLines(tx, dto.lines);
       await tx.dnStatusHistory.create({
         data: {
           delivery_note_id: dn.id,
@@ -2395,6 +2396,7 @@ export class DeliveryNotesService {
       for (const row of this.manualLineRows(id, dto)) {
         await tx.deliveryNoteLine.create({ data: row });
       }
+      await this.ensureProductsForLines(tx, dto.lines);
       if (rushChanged) {
         await tx.dnRushHistory.create({
           data: {
@@ -2414,12 +2416,26 @@ export class DeliveryNotesService {
   }
 
   /**
-   * Part auto-fill for the manual DN form: most recent description + unit
-   * price used for a part number on any previous delivery note.
+   * Part auto-fill for the manual DN form: the product master first
+   * (canonical description + unit price), falling back to the most recent
+   * description/price used for the part number on any previous delivery note.
    */
   async suggestPart(code: string) {
     const c = code.trim();
     if (!c) return null;
+    const normalized = c.toUpperCase().slice(0, 80);
+    const product = await this.prisma.product.findUnique({
+      where: { code: normalized },
+      select: { code: true, description: true, unit_price: true },
+    });
+    if (product) {
+      return {
+        material_code: product.code,
+        material_description: product.description,
+        unit_price:
+          product.unit_price != null ? String(product.unit_price) : null,
+      };
+    }
     const line = await this.prisma.deliveryNoteLine.findFirst({
       where: { material_code: { equals: c, mode: 'insensitive' } },
       orderBy: { created_at: 'desc' },
@@ -2435,6 +2451,36 @@ export class DeliveryNotesService {
       material_description: line.material_description,
       unit_price: line.unit_price != null ? String(line.unit_price) : null,
     };
+  }
+
+  /**
+   * Ensure every part code on a manual note exists in the product master.
+   * Create-only: existing rows are never overwritten, so the canonical data
+   * stays stable once seeded or curated.
+   */
+  private async ensureProductsForLines(
+    tx: Prisma.TransactionClient,
+    lines: Array<{
+      material_code: string;
+      material_description?: string | null;
+      unit_price?: number | null;
+    }>,
+  ) {
+    const seen = new Set<string>();
+    for (const l of lines) {
+      const code = l.material_code.trim().toUpperCase().slice(0, 80);
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      await tx.product.upsert({
+        where: { code },
+        update: {},
+        create: {
+          code,
+          description: l.material_description?.trim() || null,
+          unit_price: l.unit_price ?? null,
+        },
+      });
+    }
   }
 
   private async getActiveRole(payload: JwtPayload) {

@@ -9,6 +9,7 @@ import {
   PERMISSION_MANIFEST,
   ROLE_PERMISSION_DEFAULTS,
 } from '../src/access-control/permissions.manifest';
+import { backfillProducts } from './product-seed';
 
 const prisma = new PrismaClient();
 
@@ -179,6 +180,7 @@ async function main() {
   await seedPermissions();
   await seedAdminIfNeeded();
   await seedMultiRoleTestUserIfNeeded();
+  await backfillProducts(prisma);
 }
 
 main()
