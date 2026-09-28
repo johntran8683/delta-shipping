@@ -15,7 +15,12 @@ UPDATE "dn_status_history" SET "to_status" = 'NEW' WHERE "to_status" = 'PRIORITI
 ALTER TYPE "dn_status" RENAME TO "dn_status_old";
 CREATE TYPE "dn_status" AS ENUM ('NEW', 'PICKING', 'PICKED', 'PACKING', 'PACKED', 'SHIPPING_IN_PROGRESS', 'SHIPPED', 'ON_HOLD', 'CANCELLED');
 
+-- Drop the column default before changing the enum type: Postgres cannot
+-- automatically cast the default expression to the recreated type.
+ALTER TABLE "delivery_notes" ALTER COLUMN "current_status" DROP DEFAULT;
+
 ALTER TABLE "delivery_notes" ALTER COLUMN "current_status" TYPE "dn_status" USING "current_status"::text::"dn_status";
+ALTER TABLE "delivery_notes" ALTER COLUMN "current_status" SET DEFAULT 'NEW'::"dn_status";
 ALTER TABLE "dn_status_history" ALTER COLUMN "from_status" TYPE "dn_status" USING "from_status"::text::"dn_status";
 ALTER TABLE "dn_status_history" ALTER COLUMN "to_status" TYPE "dn_status" USING "to_status"::text::"dn_status";
 
