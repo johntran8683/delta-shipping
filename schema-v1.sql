@@ -96,7 +96,6 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(255) NOT NULL UNIQUE,
     display_name VARCHAR(255),
     password_hash VARCHAR(255),
-    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -338,20 +337,6 @@ ON delivery_notes (picking_started_by_user_id, current_status);
 
 CREATE INDEX IF NOT EXISTS idx_delivery_note_lines_dn
 ON delivery_note_lines (delivery_note_id);
-
--- Part master (minimal): one canonical record per part number, seeded from
--- delivery-note line history + the item-weights spreadsheet. Codes are stored
--- normalized (trimmed + uppercased) by the application.
-CREATE TABLE IF NOT EXISTS products (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code VARCHAR(80) NOT NULL,
-    description VARCHAR(255),
-    unit_price NUMERIC(18,4),
-    weight_lb NUMERIC(18,4),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_products_code UNIQUE (code)
-);
 
 -- =========================
 -- Audit history
