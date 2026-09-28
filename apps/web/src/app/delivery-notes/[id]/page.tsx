@@ -2,24 +2,22 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import type { ReactNode } from "react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { OperationsShell } from "@/components/operations-shell";
 import { StatusBadgeWithHover } from "@/components/status-badge-with-hover";
 import { detailStatusHoverInput } from "@/lib/dn-status-hover";
+import type { StatusHistoryEntry } from "@/lib/dn-status-hover";
 import { ResponseModal } from "@/components/response-modal";
 import { clearSession, getAccessToken, getActiveRoleCode } from "@/lib/auth-storage";
 import { apiBase } from "@/lib/config";
 import { DeliveryNoteNumber } from "@/components/delivery-note-number";
 import { formatDeliveryNoteNumber } from "@/lib/format-dn-number";
-import { formatDnStatusLabel } from "@/lib/dn-status";
-import { PickerDnDetailWorkspace } from "@/components/picker-dn-detail";
+import { type WorkflowHandoff } from "@/components/shipper-dn-detail";
 import {
-  ShipperDnDetailWorkspace,
-  type WorkflowHandoff,
-} from "@/components/shipper-dn-detail";
-import { SupervisorDnControls } from "@/components/supervisor-dn-controls";
+  DnWorkflowRail,
+  type PrimaryActionKey,
+} from "@/components/dn-workflow-rail";
 
 type LineRow = {
   id: string;
@@ -30,6 +28,8 @@ type LineRow = {
   order_qty: string | null;
   shipped_qty: string | null;
   open_qty: string | null;
+  unit_price: string | null;
+  line_amount: string | null;
 };
 
 type PackPeerRow = {
@@ -121,6 +121,184 @@ type Detail = {
   } | null;
   workflow_handoff?: WorkflowHandoff | null;
 };
+
+const infoCardCls =
+  "rounded-xl border border-[color:var(--app-border)] bg-[var(--app-surface)] px-4 py-4 shadow-[0_1px_0_rgba(15,23,42,0.04)] sm:px-5 dark:shadow-none";
+const infoCardTitleCls =
+  "text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400";
+
+function formatMoney(value: string | null, currency: string | null): string {
+  if (value == null || value.trim() === "") return "—";
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  const formatted = n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return currency ? `${currency} ${formatted}` : formatted;
+}
+
+function DnCustomerCard({ detail }: { detail: Detail }) {
+  const rows: Array<[string, string | null]> = [
+    ["Customer", detail.sold_to_name || "—"],
+    ["Customer code", detail.sold_to_code || "—"],
+    ["PO #", detail.customer_po?.trim() || "—"],
+    ["PO date", detail.po_date?.trim() || "—"],
+  ];
+  return (
+    <section className={infoCardCls} aria-label="Customer">
+      <h2 className={infoCardTitleCls}>Customer</h2>
+      <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
+        {rows.map(([label, value]) => (
+          <div key={label} className="min-w-0">
+            <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              {label}
+            </dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-slate-100" title={value ?? undefined}>
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function DnShipToCard({ detail }: { detail: Detail }) {
+  const loc = detail.ship_to_location;
+  const addrParts = loc
+    ? [
+        loc.street1,
+        loc.street2,
+        [loc.city, loc.state_region].filter(Boolean).join(", "),
+        loc.postal_code,
+        loc.country_name || loc.country_code,
+      ].filter((p) => p && p.trim())
+    : [];
+  return (
+    <section className={infoCardCls} aria-label="Ship to">
+      <h2 className={infoCardTitleCls}>Ship to</h2>
+      <p className="mt-3 text-sm font-medium text-slate-900 dark:text-slate-100">
+        {detail.ship_to_name || "—"}
+        {detail.ship_to_code ? (
+          <span className="ml-2 font-mono text-xs font-normal text-slate-500 dark:text-slate-400">
+            {detail.ship_to_code}
+          </span>
+        ) : null}
+      </p>
+      {addrParts.length > 0 ? (
+        <p className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+          {addrParts.map((p, i) => (
+            <span key={i}>
+              {i > 0 ? <br /> : null}
+              {p}
+            </span>
+          ))}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function DnLinesCard({ detail }: { detail: Detail }) {
+  const total = detail.lines.reduce((sum, l) => {
+    const n = l.line_amount != null ? Number(l.line_amount) : NaN;
+    return Number.isFinite(n) ? sum + n : sum;
+  }, 0);
+  const hasAnyAmount = detail.lines.some(
+    (l) => l.line_amount != null && l.line_amount.trim() !== "",
+  );
+  return (
+    <section className={infoCardCls} aria-label="Lines">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className={infoCardTitleCls}>Lines</h2>
+        <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+          {detail.lines.length} line{detail.lines.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[640px] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-[color:var(--app-border)] text-left">
+              <th className="w-14 px-2 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Item
+              </th>
+              <th className="w-24 px-2 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                SO #
+              </th>
+              <th className="px-2 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Material
+              </th>
+              <th className="w-28 px-2 py-2 text-right text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Unit price
+              </th>
+              <th className="w-20 px-2 py-2 text-right text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Qty
+              </th>
+              <th className="w-32 px-2 py-2 text-right text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Amount
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {detail.lines.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-2 py-8 text-center text-slate-500">
+                  No lines.
+                </td>
+              </tr>
+            ) : (
+              detail.lines.map((l) => (
+                <tr
+                  key={l.id}
+                  className="border-b border-slate-100 align-top last:border-0 dark:border-slate-800"
+                >
+                  <td className="px-2 py-2 font-mono text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                    {l.doc_item}
+                  </td>
+                  <td className="px-2 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">
+                    {l.so_number?.trim() || "—"}
+                  </td>
+                  <td className="px-2 py-2">
+                    <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
+                      {l.material_code ?? "—"}
+                    </span>
+                    {l.material_description ? (
+                      <span className="mt-0.5 block text-slate-800 dark:text-slate-100">
+                        {l.material_description}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                    {formatMoney(l.unit_price, null)}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">
+                    {l.shipped_qty ?? "—"}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">
+                    {formatMoney(l.line_amount, null)}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+          {hasAnyAmount ? (
+            <tfoot>
+              <tr className="border-t-2 border-[color:var(--app-border)]">
+                <td colSpan={5} className="px-2 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Total
+                </td>
+                <td className="px-2 py-2.5 text-right text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
+                  {formatMoney(String(total), detail.currency_code)}
+                </td>
+              </tr>
+            </tfoot>
+          ) : null}
+        </table>
+      </div>
+    </section>
+  );
+}
 
 function CombinedPackSessionBanner({
   session,
@@ -580,63 +758,8 @@ function PackRevertDialogIcon({
   );
 }
 
-function formatDate(value: string | null) {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function countryDisplay(loc: ShipToLocationDetail): string {
-  const name = loc.country_name?.trim();
-  const code = loc.country_code?.trim();
-  if (name && code) return `${name} (${code})`;
-  return name || code || "—";
-}
-
-/** Compact postal block: name, streets, city/region/postal, country. Empty parts omitted. */
-function shipToBlockLines(
-  loc: ShipToLocationDetail | null,
-  fallbackName: string,
-  fallbackRegion: string | null,
-): string[] {
-  if (!loc) {
-    return [fallbackName.trim(), fallbackRegion?.trim() ?? ""].filter(Boolean);
-  }
-  const locality = [loc.city, loc.state_region ?? fallbackRegion, loc.postal_code]
-    .map((s) => s?.trim())
-    .filter(Boolean)
-    .join(", ");
-  const country = countryDisplay(loc);
-  return [
-    loc.ship_to_name?.trim(),
-    loc.street1?.trim(),
-    loc.street2?.trim(),
-    locality,
-    country !== "—" ? country : "",
-  ].filter((s): s is string => Boolean(s));
-}
-
-function canPrintDnLabels(): boolean {
-  const r = (getActiveRoleCode() ?? "").trim().toUpperCase();
-  return (
-    r === "PACKER" ||
-    r === "SHIPPER" ||
-    r === "SUPERVISOR" ||
-    r === "SYSTEM"
-  );
-}
-
 function isPackerActiveRole(): boolean {
   return (getActiveRoleCode() ?? "").trim().toUpperCase() === "PACKER";
-}
-
-function isPickerActiveRole(): boolean {
-  return (getActiveRoleCode() ?? "").trim().toUpperCase() === "PICKER";
 }
 
 /** Only packers may change boxes / pack note after a session is completed. */
@@ -644,383 +767,7 @@ function canEditPackResult(): boolean {
   return isPackerActiveRole();
 }
 
-function isShipperActiveRole(): boolean {
-  return (getActiveRoleCode() ?? "").trim().toUpperCase() === "SHIPPER";
-}
-
-function isSupervisorView(): boolean {
-  const r = (getActiveRoleCode() ?? "").trim().toUpperCase();
-  return r === "SUPERVISOR" || r === "SYSTEM";
-}
-
-function normDnStatus(s: string): string {
-  return String(s ?? "")
-    .trim()
-    .toUpperCase();
-}
-
 /** True once the note has left the warehouse pack lane for outbound shipping. */
-function isShippingOrShipped(status: string): boolean {
-  const s = normDnStatus(status);
-  return s === "SHIPPING_IN_PROGRESS" || s === "SHIPPED";
-}
-
-type PickPackStepState = "complete" | "current" | "upcoming";
-
-const PICK_PACK_LABELS = ["Picked", "Packing", "Packed"] as const;
-
-function pickPackProgressFromStatus(status: string): {
-  steps: [PickPackStepState, PickPackStepState, PickPackStepState];
-  trackFillPercent: number;
-  caption: string | null;
-} {
-  const s = status.trim().toUpperCase();
-  if (s === "PICKED") {
-    return {
-      steps: ["current", "upcoming", "upcoming"],
-      trackFillPercent: 33.33,
-      caption: null,
-    };
-  }
-  if (s === "PACKING") {
-    return {
-      steps: ["complete", "current", "upcoming"],
-      trackFillPercent: 66.66,
-      caption: null,
-    };
-  }
-  if (s === "PACKED") {
-    return {
-      steps: ["complete", "complete", "current"],
-      trackFillPercent: 100,
-      caption: null,
-    };
-  }
-  return {
-    steps: ["upcoming", "upcoming", "upcoming"],
-    trackFillPercent: 0,
-    caption: `Applies after pick. Current: ${formatDnStatusLabel(status)}.`,
-  };
-}
-
-const SHIP_HANDOFF_LABELS = ["Packed", "Shipping", "Shipped"] as const;
-
-function shipperHandoffProgressFromStatus(status: string): {
-  steps: [PickPackStepState, PickPackStepState, PickPackStepState];
-  trackFillPercent: number;
-  showBar: boolean;
-  caption: string | null;
-} {
-  const s = normDnStatus(status);
-  if (s === "PACKED") {
-    return {
-      steps: ["current", "upcoming", "upcoming"],
-      trackFillPercent: 33.33,
-      showBar: true,
-      caption: null,
-    };
-  }
-  if (s === "SHIPPING_IN_PROGRESS") {
-    return {
-      steps: ["complete", "current", "upcoming"],
-      trackFillPercent: 66.66,
-      showBar: true,
-      caption: null,
-    };
-  }
-  if (s === "SHIPPED") {
-    return {
-      steps: ["complete", "complete", "current"],
-      trackFillPercent: 100,
-      showBar: true,
-      caption: null,
-    };
-  }
-  return {
-    steps: ["upcoming", "upcoming", "upcoming"],
-    trackFillPercent: 0,
-    showBar: false,
-    caption: `Shipper steps start once the note is PACKED (current: ${formatDnStatusLabel(status)}).`,
-  };
-}
-
-function shipperStepNavNextTarget(status: string): string | null {
-  const s = normDnStatus(status);
-  if (s === "PACKED") return "SHIPPING_IN_PROGRESS";
-  if (s === "SHIPPING_IN_PROGRESS") return "SHIPPED";
-  return null;
-}
-
-function shipperStepNavPrevTarget(status: string): string | null {
-  const s = normDnStatus(status);
-  if (s === "SHIPPING_IN_PROGRESS") return "PACKED";
-  return null;
-}
-
-const stepNavBtnGhost =
-  "inline-flex min-h-[2.25rem] flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-800 shadow-[0_1px_0_rgba(15,23,42,0.04)] transition hover:border-slate-300 hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-40 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-900 sm:flex-none sm:min-w-[7rem]";
-const stepNavBtnPrimary =
-  "inline-flex min-h-[2.25rem] flex-1 items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white sm:flex-none sm:min-w-[7rem]";
-
-function PickPackProgressBar({
-  status,
-  showStepActions,
-  busy,
-  onBack,
-  onNext,
-}: {
-  status: string;
-  showStepActions: boolean;
-  busy: boolean;
-  onBack: () => void;
-  onNext: () => void;
-}) {
-  const { steps, trackFillPercent, caption } = pickPackProgressFromStatus(status);
-  const progressRounded = Math.round(trackFillPercent);
-
-  const canGoBack = status === "PACKING" || status === "PACKED";
-  const canGoNext = status === "PICKED" || status === "PACKING";
-
-  return (
-    <section
-      className="print:hidden shrink-0 border-b border-slate-200/70 pb-3 dark:border-slate-800/60"
-      aria-label="Pick and pack progress"
-    >
-      <div className="min-w-0 flex-1">
-        <p className="mb-2 text-[0.65rem] font-medium uppercase tracking-[0.12em] text-slate-500 dark:text-slate-500">
-          Pick to pack
-        </p>
-
-        <div
-          className="relative"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={progressRounded}
-          aria-label={`Pack progress, ${progressRounded} percent`}
-        >
-          <div className="h-1 w-full overflow-hidden rounded-full bg-slate-200/80 dark:bg-slate-800/80">
-            <div
-              className="h-full min-w-0 rounded-full bg-slate-800 transition-[width] duration-500 ease-out dark:bg-slate-200"
-              style={{ width: `${trackFillPercent}%` }}
-            />
-          </div>
-        </div>
-
-        <ol className="mt-2 grid grid-cols-3 gap-1.5 text-center">
-          {[0, 1, 2].map((i) => (
-            <li key={PICK_PACK_LABELS[i]}>
-              <span
-                className={
-                  steps[i] === "complete"
-                    ? "inline-flex items-center justify-center gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-400"
-                    : steps[i] === "current"
-                      ? "text-[11px] font-semibold text-slate-900 dark:text-slate-100"
-                      : "text-[11px] font-normal text-slate-400 dark:text-slate-500"
-                }
-                aria-current={steps[i] === "current" ? "step" : undefined}
-              >
-                {steps[i] === "complete" ? (
-                  <span
-                    className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-slate-200 text-[9px] text-slate-600 dark:bg-slate-700 dark:text-slate-300"
-                    aria-hidden
-                  >
-                    ✓
-                  </span>
-                ) : null}
-                {PICK_PACK_LABELS[i]}
-              </span>
-            </li>
-          ))}
-        </ol>
-      </div>
-
-      {showStepActions ? (
-        <div
-          className="mt-3 flex max-w-2xl flex-col items-stretch gap-2 sm:mx-auto sm:flex-row sm:items-center sm:justify-between sm:gap-3"
-          role="group"
-          aria-label="Move between pick and pack steps"
-        >
-          <button
-            type="button"
-            disabled={busy || !canGoBack}
-            onClick={onBack}
-            title={
-              !canGoBack
-                ? "Available when packing or packed"
-                : status === "PACKED"
-                  ? "Revert to picked (unpack for rework)"
-                  : "Return to picked (leave packing)"
-            }
-            className={stepNavBtnGhost}
-          >
-            Back
-          </button>
-
-          <div className="flex justify-center sm:flex-1 sm:px-2">
-            <span className="inline-flex items-center rounded-full border border-slate-200/90 bg-slate-50 px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wide text-slate-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
-              {status}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            disabled={busy || !canGoNext}
-            onClick={onNext}
-            title={
-              !canGoNext
-                ? "Packed — use Back to return to picked if you need to rework"
-                : status === "PICKED"
-                  ? "Start packing — combine with other PICKED notes in the list if you want"
-                  : "Enter boxes and mark packed"
-            }
-            className={stepNavBtnPrimary}
-          >
-            Next
-          </button>
-        </div>
-      ) : null}
-
-      {caption ? (
-        <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-          {caption}
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
-function ShipperHandoffProgressBar({
-  status,
-  busy,
-  onBack,
-  onAdvance,
-}: {
-  status: string;
-  busy: boolean;
-  onBack: () => void;
-  onAdvance: (toStatus: string) => void;
-}) {
-  const { steps, trackFillPercent, showBar, caption } =
-    shipperHandoffProgressFromStatus(status);
-  const progressRounded = Math.round(trackFillPercent);
-  const nextTarget = shipperStepNavNextTarget(status);
-  const prevTarget = shipperStepNavPrevTarget(status);
-  const s = normDnStatus(status);
-
-  return (
-    <section
-      className="print:hidden shrink-0 border-b border-slate-200/70 pb-3 dark:border-slate-800/60"
-      aria-label="Ship handoff progress"
-    >
-      <div className="min-w-0 flex-1">
-        <p className="mb-2 text-[0.65rem] font-medium uppercase tracking-[0.12em] text-slate-500 dark:text-slate-500">
-          Ship handoff
-        </p>
-
-        {showBar ? (
-          <>
-            <div
-              className="relative"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={progressRounded}
-              aria-label={`Ship handoff progress, ${progressRounded} percent`}
-            >
-              <div className="h-1 w-full overflow-hidden rounded-full bg-slate-200/80 dark:bg-slate-800/80">
-                <div
-                  className="h-full min-w-0 rounded-full bg-emerald-700 transition-[width] duration-500 ease-out dark:bg-emerald-500"
-                  style={{ width: `${trackFillPercent}%` }}
-                />
-              </div>
-            </div>
-
-            <ol className="mt-2 grid grid-cols-3 gap-1.5 text-center">
-              {[0, 1, 2].map((i) => (
-                <li key={SHIP_HANDOFF_LABELS[i]}>
-                  <span
-                    className={
-                      steps[i] === "complete"
-                        ? "inline-flex items-center justify-center gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-400"
-                        : steps[i] === "current"
-                          ? "text-[11px] font-semibold text-slate-900 dark:text-slate-100"
-                          : "text-[11px] font-normal text-slate-400 dark:text-slate-500"
-                    }
-                    aria-current={steps[i] === "current" ? "step" : undefined}
-                  >
-                    {steps[i] === "complete" ? (
-                      <span
-                        className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-100 text-[9px] text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                        aria-hidden
-                      >
-                        ✓
-                      </span>
-                    ) : null}
-                    {SHIP_HANDOFF_LABELS[i]}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </>
-        ) : null}
-
-        {caption ? (
-          <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-            {caption}
-          </p>
-        ) : null}
-      </div>
-
-      {showBar && (prevTarget || nextTarget) ? (
-        <div
-          className="mt-3 flex max-w-2xl flex-col items-stretch gap-2 sm:mx-auto sm:flex-row sm:items-center sm:justify-end sm:gap-3"
-          role="group"
-          aria-label="Ship handoff actions"
-        >
-          <span className="inline-flex items-center justify-center rounded-full border border-slate-200/90 bg-slate-50 px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wide text-slate-700 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300 sm:mr-auto">
-            {formatDnStatusLabel(status)}
-          </span>
-          {prevTarget ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={onBack}
-              className={stepNavBtnGhost}
-            >
-              Back to packed
-            </button>
-          ) : null}
-          {nextTarget ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onAdvance(nextTarget)}
-              className={stepNavBtnPrimary}
-            >
-              {s === "PACKED"
-                ? "Start shipping"
-                : s === "SHIPPING_IN_PROGRESS"
-                  ? "Mark shipped"
-                  : "Next"}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
-      {s === "SHIPPED" ? (
-        <p className="mt-3 text-xs leading-relaxed text-emerald-800 dark:text-emerald-200/90">
-          This delivery note is complete. Packing changes are no longer available.
-        </p>
-      ) : isShippingOrShipped(status) ? (
-        <p className="mt-3 text-xs leading-relaxed text-amber-900/90 dark:text-amber-100/90">
-          While shipping is in progress, packers cannot return this note to packing
-          or picked.
-        </p>
-      ) : null}
-    </section>
-  );
-}
 
 type BoxRowState = {
   boxNumber: string;
@@ -1113,31 +860,6 @@ function buildValidatedBoxes(rows: BoxRowState[]):
   return { ok: true, boxes };
 }
 
-function DetailPanel({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-xl border border-[color:var(--app-border)] bg-[var(--app-surface)] px-4 py-4 shadow-[0_1px_0_rgba(15,23,42,0.04)] sm:px-5 sm:py-5 dark:shadow-none">
-      <header className="mb-4 border-b border-slate-100 pb-3 dark:border-slate-800/80">
-        <h2 className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-500">
-          {title}
-        </h2>
-        {description ? (
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-            {description}
-          </p>
-        ) : null}
-      </header>
-      {children}
-    </section>
-  );
-}
 
 export default function DeliveryNoteDetailPage() {
   const params = useParams();
@@ -1156,17 +878,6 @@ export default function DeliveryNoteDetailPage() {
   const [busy, setBusy] = useState(false);
 
   /** Distinct SO numbers across this DN's lines. */
-  const distinctSoNumbers = useMemo(() => {
-    if (!detail) return [];
-    return Array.from(
-      new Set(
-        detail.lines
-          .map((l) => l.so_number?.trim())
-          .filter((s): s is string => !!s),
-      ),
-    ).sort();
-  }, [detail]);
-
   /** Whole calendar days this DN has been sitting in NEW (null otherwise). */
   const newAgeDays = useMemo(() => {
     if (!detail || detail.current_status.trim().toUpperCase() !== "NEW")
@@ -1207,7 +918,6 @@ export default function DeliveryNoteDetailPage() {
     null,
   );
   const [shipStartOpen, setShipStartOpen] = useState(false);
-  const [dnArticleOpen, setDnArticleOpen] = useState(false);
 
   useEffect(() => {
     setPortalMounted(true);
@@ -1472,37 +1182,6 @@ export default function DeliveryNoteDetailPage() {
     if (ok) setPackRevertOpen(null);
   }
 
-  async function openDnPdf(pathSuffix: string) {
-    const token = getAccessToken();
-    if (!token) return;
-    setError(null);
-    try {
-      const res = await fetch(`${apiBase}/delivery-notes/${id}${pathSuffix}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.status === 401) {
-        clearSession();
-        router.replace("/login");
-        return;
-      }
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(
-          typeof data.message === "string"
-            ? data.message
-            : `Print failed (${res.status})`,
-        );
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener,noreferrer");
-      window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
-    }
-  }
-
   async function packStartRequest(
     peerIds: string[],
     confirmDoubleClaim = false,
@@ -1671,7 +1350,6 @@ export default function DeliveryNoteDetailPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     updateStatusOpen,
     startPackingDialogOpen,
@@ -1835,29 +1513,30 @@ export default function DeliveryNoteDetailPage() {
     );
   }
 
-  const supervisorView = isSupervisorView();
 
-  const shipperHeaderPrintActions =
-    detail && isShipperActiveRole() && canPrintDnLabels() ? (
-      <>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void openDnPdf("/print/shipping-label.pdf")}
-          className={`${btnBase} ${btnGhost}`}
-        >
-          Shipping label
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void openDnPdf("/print/po-label.pdf")}
-          className={`${btnBase} ${btnGhost}`}
-        >
-          PO label
-        </button>
-      </>
-    ) : null;
+  function handleRailPrimaryAction(key: PrimaryActionKey) {
+    if (busy) return;
+    switch (key) {
+      case "START_PICKING":
+        void runStatusTransition("PICKING");
+        break;
+      case "MARK_PICKED":
+        void runStatusTransition("PICKED");
+        break;
+      case "START_PACKING":
+        openStartPackingDialog();
+        break;
+      case "MARK_PACKED":
+        openUpdateStatusModal();
+        break;
+      case "START_SHIPPING":
+        shipperAdvance("SHIPPING_IN_PROGRESS");
+        break;
+      case "MARK_SHIPPED":
+        shipperAdvance("SHIPPED");
+        break;
+    }
+  }
 
   return (
     <OperationsShell
@@ -1888,43 +1567,38 @@ export default function DeliveryNoteDetailPage() {
               {detail.lines.length} line
               {detail.lines.length === 1 ? "" : "s"}
             </span>
-            {!supervisorView ? (
-              <>
-                <StatusBadgeWithHover
-                  status={detail.current_status}
-                  isOpen={detail.is_open}
-                  hoverInput={detailStatusHoverInput({
-                    status_history: detail.status_history,
-                    completed_pack_sessions: detail.completed_pack_sessions,
-                  })}
-                />
-                {newAgeDays != null ? (
-                  <span
-                    className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500"
-                    title={
-                      newAgeDays === 0
-                        ? "Imported today"
-                        : `In New for ${newAgeDays} day${newAgeDays === 1 ? "" : "s"}`
-                    }
-                  >
-                    · {newAgeDays === 0 ? "today" : `${newAgeDays}d`}
-                  </span>
-                ) : null}
-                {detail.current_priority_no != null ? (
-                  <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                    P{detail.current_priority_no}
-                  </span>
-                ) : null}
-              </>
+            <StatusBadgeWithHover
+              status={detail.current_status}
+              isOpen={detail.is_open}
+              hoverInput={detailStatusHoverInput({
+                status_history: detail.status_history,
+                completed_pack_sessions: detail.completed_pack_sessions,
+              })}
+            />
+            {newAgeDays != null ? (
+              <span
+                className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500"
+                title={
+                  newAgeDays === 0
+                    ? "Imported today"
+                    : `In New for ${newAgeDays} day${newAgeDays === 1 ? "" : "s"}`
+                }
+              >
+                · {newAgeDays === 0 ? "today" : `${newAgeDays}d`}
+              </span>
+            ) : null}
+            {detail.current_priority_no != null ? (
+              <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                P{detail.current_priority_no}
+              </span>
             ) : null}
           </div>
         ) : (
           <span className="text-sm text-slate-500">Loading record…</span>
         )
       }
-      headerActions={shipperHeaderPrintActions}
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-2 sm:gap-2.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
         <nav className="shrink-0">
           <Link
             href="/delivery-notes"
@@ -1940,113 +1614,24 @@ export default function DeliveryNoteDetailPage() {
           </Link>
         </nav>
 
-        {detail && supervisorView ? (
-          <div className="shrink-0">
-          <SupervisorDnControls
-            currentStatus={detail.current_status}
-            onHoldFromStatus={detail.on_hold_from_status}
-            isOpen={detail.is_open}
-            isRushed={detail.is_rushed}
-            storedRushReason={detail.latest_rush_reason}
-            currentPriorityNo={detail.current_priority_no}
-            allowedNextStatuses={detail.allowedNextStatuses}
-            canSetPriority={detail.canSetPriority}
-            canMarkRush={detail.canMarkRush}
-            canClearRush={detail.canClearRush}
-            busy={busy}
-            onTransition={supervisorStatusTransition}
-            onPrioritySave={savePriorityFromModal}
-            onRushSave={saveRushFromModal}
-            onPrintShippingLabel={
-              canPrintDnLabels()
-                ? () => void openDnPdf("/print/shipping-label.pdf")
-                : undefined
-            }
-            onPrintPoLabel={
-              canPrintDnLabels()
-                ? () => void openDnPdf("/print/po-label.pdf")
-                : undefined
-            }
-            statusHistory={detail.status_history}
-            completedPackSessions={detail.completed_pack_sessions}
+        {detail &&
+        detail.current_status === "PACKING" &&
+        detail.active_pack_session ? (
+          <CombinedPackSessionBanner
+            session={detail.active_pack_session}
+            currentDnId={detail.id}
           />
-          </div>
         ) : null}
-
-        {detail ? (
-          <div className="shrink-0 space-y-2">
-            {!supervisorView &&
-            !isPickerActiveRole() &&
-            (isShipperActiveRole() ? (
-              <ShipperHandoffProgressBar
-                status={detail.current_status}
-                busy={busy}
-                onBack={() => void postTransition("PACKED")}
-                onAdvance={(toStatus) => shipperAdvance(toStatus)}
-              />
-            ) : (
-              <PickPackProgressBar
-                status={detail.current_status}
-                showStepActions={
-                  isPackerActiveRole() &&
-                  !isShippingOrShipped(detail.current_status) &&
-                  (detail.current_status === "PICKED" ||
-                    detail.current_status === "PACKING" ||
-                    detail.current_status === "PACKED")
-                }
-                busy={busy}
-                onBack={() =>
-                  void postTransition(
-                    detail.current_status === "PACKED" ? "PACKING" : "PICKED",
-                  )
-                }
-                onNext={openUpdateStatusModal}
-              />
-            ))}
-            {!isPickerActiveRole() && isPackerActiveRole() &&
-            (detail.current_status === "PICKED" ||
-              detail.current_status === "PACKING") ? (
-              <p className="print:hidden max-w-2xl text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-                <span className="font-medium text-slate-600 dark:text-slate-300">
-                  Packing
-                </span>
-                {" — "}
-                {detail.current_status === "PICKED" ? (
-                  <>
-                    Use <span className="font-semibold">Next</span> to start packing
-                    and optionally combine other{" "}
-                    <span className="font-mono text-[11px]">PICKED</span> notes from
-                    the same cluster.
-                  </>
-                ) : (
-                  <>
-                    Use <span className="font-semibold">Next</span> to enter each box
-                    (weight and dimensions), then mark this session{" "}
-                    <span className="font-mono text-[11px]">PACKED</span>.
-                  </>
-                )}
-              </p>
-            ) : null}
-            {!isPickerActiveRole() &&
-            detail.current_status === "PACKING" &&
-            detail.active_pack_session ? (
-              <CombinedPackSessionBanner
-                session={detail.active_pack_session}
-                currentDnId={detail.id}
-              />
-            ) : null}
-            {!isPickerActiveRole() &&
-            detail.current_status === "PACKED" &&
-            detail.completed_pack_sessions?.[0] ? (
-              <CompletedPackResultBanner
-                session={detail.completed_pack_sessions[0]}
-                currentDnId={detail.id}
-                totalSessionCount={detail.completed_pack_sessions.length}
-                editable={canEditPackResult()}
-                onEdit={canEditPackResult() ? openEditPackResultModal : undefined}
-              />
-            ) : null}
-          </div>
+        {detail &&
+        detail.current_status === "PACKED" &&
+        detail.completed_pack_sessions?.[0] ? (
+          <CompletedPackResultBanner
+            session={detail.completed_pack_sessions[0]}
+            currentDnId={detail.id}
+            totalSessionCount={detail.completed_pack_sessions.length}
+            editable={canEditPackResult()}
+            onEdit={canEditPackResult() ? openEditPackResultModal : undefined}
+          />
         ) : null}
 
         {!detail && !error ? (
@@ -2054,225 +1639,32 @@ export default function DeliveryNoteDetailPage() {
         ) : null}
 
         {detail ? (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="mx-auto flex min-h-0 w-full min-w-0 flex-1 flex-col xl:mx-0 xl:max-w-6xl 2xl:max-w-7xl">
-              {isPickerActiveRole() ? (
-                <PickerDnDetailWorkspace
-                  detail={detail}
-                  currentStatus={detail.current_status}
-                  allowedNextStatuses={detail.allowedNextStatuses}
-                  workflowHandoff={detail.workflow_handoff}
-                  busy={busy}
-                  transitionError={error}
-                  fullDnOpen={dnArticleOpen}
-                  onToggleFullDn={() => setDnArticleOpen((o) => !o)}
-                  onStartPicking={() => void runStatusTransition("PICKING")}
-                  onMarkPicked={() => void runStatusTransition("PICKED")}
-                />
-              ) : null}
-              {isShipperActiveRole() ? (
-                <div className="mb-3 shrink-0">
-                  <ShipperDnDetailWorkspace
-                    detail={detail}
-                    currentDnId={detail.id}
-                    currentStatus={detail.current_status}
-                    latestShipment={detail.latest_shipment}
-                    workflowHandoff={detail.workflow_handoff}
-                  />
-                </div>
-              ) : null}
-              {isShipperActiveRole() ? (
-                <div className="mb-2 shrink-0 print:hidden">
-                  <button
-                    type="button"
-                    onClick={() => setDnArticleOpen((o) => !o)}
-                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950/50 dark:hover:border-slate-600"
-                    aria-expanded={dnArticleOpen}
-                  >
-                    <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                      Full delivery note
-                    </span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                      {dnArticleOpen ? "Hide" : "Show"} printable document
-                    </span>
-                  </button>
-                </div>
-              ) : null}
-              <div
-                className={`min-h-0 flex-1 overflow-x-auto overflow-y-auto pb-1 [-webkit-overflow-scrolling:touch] print:overflow-visible ${
-                  (isShipperActiveRole() || isPickerActiveRole()) && !dnArticleOpen
-                    ? "hidden print:block"
-                    : ""
-                }`}
-              >
-                <article className="box-border flex min-h-0 w-full max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white text-sm text-slate-900 shadow-sm print:min-h-[297mm] print:w-[210mm] print:rounded-none print:border-slate-900 print:text-[12px] print:shadow-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
-                  {!isShipperActiveRole() &&
-                  !isPickerActiveRole() &&
-                  !supervisorView ? (
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-2.5 print:hidden dark:border-slate-700 dark:bg-slate-900/60">
-                    <span className="text-[0.65rem] font-bold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-400">
-                      Print
-                    </span>
-                    {canPrintDnLabels() ? (
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void openDnPdf("/print/shipping-label.pdf")}
-                          className={`${btnBase} ${btnGhost}`}
-                        >
-                          Shipping label (PDF)
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void openDnPdf("/print/po-label.pdf")}
-                          className={`${btnBase} ${btnGhost}`}
-                        >
-                          PO label (PDF)
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="max-w-[14rem] text-right text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-                        Switch to Packer, Shipper, Supervisor, or System to print
-                        labels.
-                      </p>
-                    )}
-                  </div>
-                  ) : null}
-
-                <header className="flex shrink-0 flex-col gap-1 border-b border-slate-200 px-5 py-3.5 sm:flex-row sm:items-end sm:justify-between print:border-slate-900 print:px-[10mm] dark:border-slate-700">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
-                      Delivery note
-                    </p>
-                    <DeliveryNoteNumber
-                      dnNumber={detail.dn_number}
-                      isRushed={detail.is_rushed}
-                      rushReason={detail.latest_rush_reason}
-                      numberClassName="font-mono text-lg font-semibold tabular-nums tracking-tight text-slate-900 print:text-[13pt] dark:text-slate-50"
-                    />
-                    {distinctSoNumbers.length > 0 ? (
-                      <p className="mt-1 font-mono text-xs tabular-nums text-slate-500 dark:text-slate-400">
-                        <span className="font-sans text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
-                          SO{" "}
-                        </span>
-                        {distinctSoNumbers.join(", ")}
-                      </p>
-                    ) : null}
-                  </div>
-                  <p className="text-sm text-slate-700 dark:text-slate-200">
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
-                      Via{" "}
-                    </span>
-                    {detail.shipping_type?.trim() || "—"}
-                  </p>
-                </header>
-
-                <div className="grid shrink-0 border-b border-slate-200 sm:grid-cols-2 sm:divide-x sm:divide-slate-200 print:border-slate-900 dark:border-slate-700 dark:sm:divide-slate-700">
-                  <section className="border-b border-slate-200 px-5 py-3.5 sm:border-b-0 print:border-slate-900 print:px-[10mm] dark:border-slate-700">
-                    <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
-                      Customer
-                    </h2>
-                    <p className="mt-1.5 text-sm font-semibold leading-snug">
-                      {detail.sold_to_name}
-                    </p>
-                    <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
-                      {detail.sold_to_code}
-                    </p>
-                    <p className="mt-2 text-xs leading-snug text-slate-600 dark:text-slate-300">
-                      PO {detail.customer_po?.trim() || "—"}
-                      <span className="text-slate-300 dark:text-slate-600"> · </span>
-                      {formatDate(detail.po_date)}
-                    </p>
-                  </section>
-                  <section className="px-5 py-3.5 print:px-[10mm]">
-                    <h2 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">
-                      Ship to
-                      <span className="ml-2 font-mono font-medium normal-case tracking-normal text-slate-500 dark:text-slate-400">
-                        {detail.ship_to_code}
-                      </span>
-                    </h2>
-                    <address className="mt-1.5 space-y-0.5 text-sm not-italic leading-snug">
-                      {shipToBlockLines(
-                        detail.ship_to_location ?? null,
-                        detail.ship_to_name,
-                        detail.ship_to_region_state,
-                      ).map((line, i) => (
-                        <p
-                          key={`${i}-${line}`}
-                          className={
-                            i === 0
-                              ? "font-medium"
-                              : "text-slate-700 dark:text-slate-300"
-                          }
-                        >
-                          {line}
-                        </p>
-                      ))}
-                    </address>
-                  </section>
-                </div>
-
-                <div className="min-h-0 flex-1 overflow-x-auto">
-                  <table className="w-full border-collapse text-left text-sm leading-snug print:text-[12px]">
-                    <thead>
-                      <tr className="border-b border-slate-200 bg-slate-50 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 print:border-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400">
-                        <th className="w-16 px-5 py-2 font-semibold print:pl-[10mm]">
-                          Item
-                        </th>
-                        <th className="px-2 py-2 font-semibold">SO #</th>
-                        <th className="px-2 py-2 font-semibold">Material</th>
-                        <th className="w-24 px-5 py-2 text-right font-semibold print:pr-[10mm]">
-                          Qty
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detail.lines.length === 0 ? (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="px-5 py-8 text-center text-slate-500"
-                          >
-                            No lines.
-                          </td>
-                        </tr>
-                      ) : (
-                        detail.lines.map((l) => (
-                          <tr
-                            key={l.id}
-                            className="border-b border-slate-100 align-top last:border-0 dark:border-slate-800"
-                          >
-                            <td className="px-5 py-2 font-mono text-xs tabular-nums text-slate-500 print:pl-[10mm] dark:text-slate-400">
-                              {l.doc_item}
-                            </td>
-                            <td className="px-2 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">
-                              {l.so_number?.trim() || "—"}
-                            </td>
-                            <td className="px-2 py-2">
-                              <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
-                                {l.material_code ?? "—"}
-                              </span>
-                              {l.material_description ? (
-                                <span className="mt-0.5 block text-slate-800 dark:text-slate-100">
-                                  {l.material_description}
-                                </span>
-                              ) : null}
-                            </td>
-                            <td className="px-5 py-2 text-right tabular-nums print:pr-[10mm]">
-                              {l.shipped_qty ?? "—"}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </article>
-              </div>
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
+            <div className="min-w-0 space-y-4">
+              <DnCustomerCard detail={detail} />
+              <DnShipToCard detail={detail} />
+              <DnLinesCard detail={detail} />
             </div>
-
+            <div className="min-w-0 xl:sticky xl:top-4">
+              <DnWorkflowRail
+                status={detail.current_status}
+                onHoldFromStatus={detail.on_hold_from_status}
+                isRushed={detail.is_rushed}
+                rushReason={detail.latest_rush_reason}
+                currentPriorityNo={detail.current_priority_no}
+                allowedNextStatuses={detail.allowedNextStatuses}
+                canSetPriority={detail.canSetPriority}
+                canMarkRush={detail.canMarkRush}
+                canClearRush={detail.canClearRush}
+                busy={busy}
+                onPrimaryAction={handleRailPrimaryAction}
+                onTransition={supervisorStatusTransition}
+                onPrioritySave={savePriorityFromModal}
+                onRushSave={saveRushFromModal}
+                handoff={detail.workflow_handoff}
+                statusHistory={detail.status_history as StatusHistoryEntry[]}
+              />
+            </div>
           </div>
         ) : null}
       </div>
