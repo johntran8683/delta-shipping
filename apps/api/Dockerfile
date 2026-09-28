@@ -4,6 +4,10 @@ FROM node:20-bookworm-slim
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
+# Prisma needs the OpenSSL CLI to detect the right engine binaries
+# (without it, it defaults to openssl-1.1.x and the schema engine crashes).
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /repo
 
 # Install workspace deps for the api package only (dev deps included:
