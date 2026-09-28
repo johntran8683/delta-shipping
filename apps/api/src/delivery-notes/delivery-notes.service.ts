@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, dn_status } from '@prisma/client';
+import { Prisma, batch_status, dn_status, source_type } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import type { JwtPayload } from '../auth/jwt-payload';
 import { PermissionsService } from '../auth/permissions.service';
@@ -24,12 +25,17 @@ import {
   deliveryNoteEligibleForRush,
   rushMarkBlockedMessage,
 } from './dn-rush.policy';
-import { ALL_DN_STATUSES, getTransitionMeta } from './dn-transition.policy';
+import {
+  ALL_DN_STATUSES,
+  SUPERVISING_ROLES,
+  getTransitionMeta,
+} from './dn-transition.policy';
 import {
   DELIVERY_NOTE_STATS_TIMEZONE,
   getVancouverDayBoundsUtc,
 } from './delivery-note-stats';
 import type { CompletePackDto } from './dto/complete-pack.dto';
+import type { CreateDeliveryNoteDto } from './dto/manual-delivery-note.dto';
 import type { ListDeliveryNotesQueryDto } from './dto/list-delivery-notes.query.dto';
 import type { StartPackDto } from './dto/start-pack.dto';
 
@@ -1261,13 +1267,14 @@ export class DeliveryNotesService {
         ),
     );
     const canSetPriority =
-      role.code === 'SUPERVISOR' &&
+      (role.code === 'SUPERVISOR' || role.code === 'TEAM_LEAD') &&
       (await this.permissions.roleHasPermission(
         payload.activeRoleId,
         'dn.priority.set',
       ));
     const hasRushPermission =
-      (role.code === 'SUPERVISOR' || role.code === 'SYSTEM') &&
+      (role.code === 'SYSTEM' ||
+        (SUPERVISING_ROLES as readonly string[]).includes(role.code)) &&
       (await this.permissions.roleHasPermission(
         payload.activeRoleId,
         'dn.rush.set',
@@ -1929,8 +1936,10 @@ export class DeliveryNotesService {
     }
 
     const role = await this.getActiveRole(payload);
-    if (role.code !== 'SUPERVISOR') {
-      throw new ForbiddenException('Only supervisors can set priority');
+    if (role.code !== 'SUPERVISOR' && role.code !== 'TEAM_LEAD') {
+      throw new ForbiddenException(
+        'Only supervisors and team leads can set priority',
+      );
     }
     const ok = await this.permissions.roleHasPermission(
       payload.activeRoleId,
@@ -1977,8 +1986,13 @@ export class DeliveryNotesService {
     }
 
     const role = await this.getActiveRole(payload);
-    if (role.code !== 'SUPERVISOR' && role.code !== 'SYSTEM') {
-      throw new ForbiddenException('Only supervisors can set rush');
+    const canSuperviseRush =
+      role.code === 'SYSTEM' ||
+      (SUPERVISING_ROLES as readonly string[]).includes(role.code);
+    if (!canSuperviseRush) {
+      throw new ForbiddenException(
+        'Only supervisors, team leads, and CSAs can set rush',
+      );
     }
     const ok = await this.permissions.roleHasPermission(
       payload.activeRoleId,
@@ -2024,6 +2038,403 @@ export class DeliveryNotesService {
     ]);
 
     return this.findOne(id, payload);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Manual delivery note creation (supervisor / team lead / CSA screen).
+  // ---------------------------------------------------------------------------
+
+  /**
+   * "Today's priority": the priority assigned to today's most recent daily-DN
+   * import batch. Falls back to max+1 over open notes (what today's import
+   * would assign) when no import has run today yet.
+   */
+  private async resolveTodayPriority(): Promise<number> {
+    const { startUtc, endUtc } = getVancouverDayBoundsUtc();
+    const batch = await this.prisma.importBatch.findFirst({
+      where: {
+        source_type: source_type.DAILY_DN,
+        status: { in: [batch_status.SUCCESS, batch_status.PARTIAL] },
+        started_at: { gte: startUtc, lt: endUtc },
+      },
+      orderBy: { started_at: 'desc' },
+      select: { id: true },
+    });
+    if (batch) {
+      const note = await this.prisma.deliveryNote.findFirst({
+        where: {
+          created_by_import_batch_id: batch.id,
+          current_priority_no: { not: null },
+        },
+        select: { current_priority_no: true },
+      });
+      if (note?.current_priority_no != null) return note.current_priority_no;
+    }
+    const agg = await this.prisma.deliveryNote.aggregate({
+      where: { is_open: true, current_priority_no: { not: null } },
+      _max: { current_priority_no: true },
+    });
+    const maxP = agg._max.current_priority_no;
+    return maxP == null || maxP < 1 ? 1 : maxP + 1;
+  }
+
+  private normalizePartyCode(code: string): string {
+    return code.trim().toUpperCase().slice(0, 30);
+  }
+
+  /**
+   * Resolve the customer + ship-to for a manual DN: use the existing records,
+   * or create them inline from the form's new_customer / new_ship_to blocks.
+   */
+  private async resolveManualParties(
+    tx: Prisma.TransactionClient,
+    dto: CreateDeliveryNoteDto,
+  ) {
+    const hasCustomerId = !!dto.customer_id;
+    const hasNewCustomer = !!dto.new_customer;
+    if (hasCustomerId === hasNewCustomer) {
+      throw new BadRequestException(
+        'Choose an existing customer or enter a new one (not both).',
+      );
+    }
+    const hasShipToId = !!dto.ship_to_location_id;
+    const hasNewShipTo = !!dto.new_ship_to;
+    if (hasShipToId === hasNewShipTo) {
+      throw new BadRequestException(
+        'Choose an existing ship-to or enter a new one (not both).',
+      );
+    }
+
+    let customer;
+    if (dto.customer_id) {
+      customer = await tx.customer.findUnique({
+        where: { id: dto.customer_id },
+      });
+      if (!customer) throw new NotFoundException('Customer not found');
+    } else {
+      const nc = dto.new_customer!;
+      const soldToCode = this.normalizePartyCode(nc.sold_to_code);
+      if (!soldToCode) {
+        throw new BadRequestException('New customer code is required');
+      }
+      const dupe = await tx.customer.findUnique({
+        where: { sold_to_code: soldToCode },
+      });
+      if (dupe) {
+        throw new ConflictException(
+          `Customer code ${soldToCode} already exists — pick it from the list instead.`,
+        );
+      }
+      customer = await tx.customer.create({
+        data: {
+          sold_to_code: soldToCode,
+          sold_to_name: nc.sold_to_name.trim(),
+          default_contact_name: nc.default_contact_name?.trim() || null,
+          default_phone: nc.default_phone?.trim() || null,
+          default_email: nc.default_email?.trim() || null,
+        },
+      });
+    }
+
+    let shipTo;
+    if (dto.ship_to_location_id) {
+      shipTo = await tx.shipToLocation.findUnique({
+        where: { id: dto.ship_to_location_id },
+      });
+      if (!shipTo || shipTo.customer_id !== customer.id) {
+        throw new BadRequestException(
+          'Ship-to location does not belong to the selected customer.',
+        );
+      }
+    } else {
+      const ns = dto.new_ship_to!;
+      const shipToCode = this.normalizePartyCode(ns.ship_to_code);
+      if (!shipToCode) {
+        throw new BadRequestException('New ship-to code is required');
+      }
+      const dupe = await tx.shipToLocation.findUnique({
+        where: {
+          customer_id_ship_to_code: {
+            customer_id: customer.id,
+            ship_to_code: shipToCode,
+          },
+        },
+      });
+      if (dupe) {
+        throw new ConflictException(
+          `Ship-to code ${shipToCode} already exists for this customer — pick it from the list instead.`,
+        );
+      }
+      shipTo = await tx.shipToLocation.create({
+        data: {
+          customer_id: customer.id,
+          ship_to_code: shipToCode,
+          ship_to_name: ns.ship_to_name.trim(),
+          street1: ns.street1?.trim() || null,
+          street2: ns.street2?.trim() || null,
+          city: ns.city?.trim() || null,
+          state_region: ns.state_region?.trim() || null,
+          postal_code: ns.postal_code?.trim() || null,
+          country_code: ns.country_code?.trim() || null,
+          contact_name: ns.contact_name?.trim() || null,
+          phone: ns.phone?.trim() || null,
+        },
+      });
+    }
+    return { customer, shipTo };
+  }
+
+  private async assertManualRushAllowed(
+    payload: JwtPayload,
+    rushed: boolean,
+  ): Promise<void> {
+    if (!rushed) return;
+    const ok = await this.permissions.roleHasPermission(
+      payload.activeRoleId,
+      'dn.rush.set',
+    );
+    if (!ok) {
+      throw new ForbiddenException('Missing permission: dn.rush.set');
+    }
+  }
+
+  private async resolveManualPriority(
+    payload: JwtPayload,
+    priorityNo: number | undefined,
+  ): Promise<number> {
+    if (priorityNo == null) return this.resolveTodayPriority();
+    const ok = await this.permissions.roleHasPermission(
+      payload.activeRoleId,
+      'dn.priority.set',
+    );
+    if (!ok) {
+      throw new ForbiddenException('Missing permission: dn.priority.set');
+    }
+    return priorityNo;
+  }
+
+  private manualLineRows(deliveryNoteId: string, dto: CreateDeliveryNoteDto) {
+    return dto.lines.map((l, i) => {
+      const qty = l.order_qty;
+      const price = l.unit_price ?? 0;
+      return {
+        delivery_note_id: deliveryNoteId,
+        doc_item: i + 1,
+        so_number: l.so_number?.trim() || null,
+        material_code: l.material_code.trim(),
+        material_description: l.material_description?.trim() || null,
+        order_qty: qty,
+        open_qty: qty,
+        // Nothing has shipped on a manually created NEW note; the import
+        // fills this from the Excel "Shipped QTY" column instead.
+        shipped_qty: 0,
+        unit_price: price,
+        line_amount: qty * price,
+      };
+    });
+  }
+
+  private toDateOrNull(value: string | undefined): Date | null {
+    if (!value) return null;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) {
+      throw new BadRequestException(`Invalid date: ${value}`);
+    }
+    return d;
+  }
+
+  async createManual(dto: CreateDeliveryNoteDto, payload: JwtPayload) {
+    const dnNumber = dto.dn_number.trim();
+    if (!dnNumber) {
+      throw new BadRequestException('Delivery note number is required');
+    }
+    const dupe = await this.prisma.deliveryNote.findUnique({
+      where: { dn_number: dnNumber },
+    });
+    if (dupe) {
+      throw new ConflictException(`Delivery note ${dnNumber} already exists.`);
+    }
+    if (!dto.lines?.length) {
+      throw new BadRequestException('At least one line item is required');
+    }
+    await this.assertManualRushAllowed(payload, !!dto.is_rushed);
+    const priorityNo = await this.resolveManualPriority(
+      payload,
+      dto.priority_no,
+    );
+    const rushReason = dto.rush_reason?.trim() || null;
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const { customer, shipTo } = await this.resolveManualParties(tx, dto);
+      const dn = await tx.deliveryNote.create({
+        data: {
+          dn_number: dnNumber,
+          sold_to_code: customer.sold_to_code,
+          ship_to_code: shipTo.ship_to_code,
+          customer_id: customer.id,
+          ship_to_location_id: shipTo.id,
+          // Manual notes belong to no import batch; revert only removes notes
+          // whose created_by_import_batch_id matches the reverted batch.
+          last_seen_import_batch_id: null,
+          created_by_import_batch_id: null,
+          current_status: dn_status.NEW,
+          current_priority_no: priorityNo,
+          is_rushed: !!dto.is_rushed,
+          latest_rush_reason: dto.is_rushed ? rushReason : null,
+          is_open: true,
+          currency_code: dto.currency_code?.trim() || 'CAD',
+          customer_po: dto.customer_po?.trim() || null,
+          po_date: this.toDateOrNull(dto.po_date),
+          requested_delivery_date: this.toDateOrNull(
+            dto.requested_delivery_date,
+          ),
+          dn_create_date: new Date(),
+        },
+        select: { id: true, is_rushed: true },
+      });
+      for (const row of this.manualLineRows(dn.id, dto)) {
+        await tx.deliveryNoteLine.create({ data: row });
+      }
+      await tx.dnStatusHistory.create({
+        data: {
+          delivery_note_id: dn.id,
+          from_status: null,
+          to_status: dn_status.NEW,
+          message: 'Created manually',
+          actor_user_id: payload.sub,
+          actor_role_id: payload.activeRoleId,
+          source: 'MANUAL',
+        },
+      });
+      if (dto.is_rushed) {
+        await tx.dnRushHistory.create({
+          data: {
+            delivery_note_id: dn.id,
+            from_rushed: false,
+            to_rushed: true,
+            reason: rushReason ?? 'Marked rush on creation',
+            actor_user_id: payload.sub,
+            actor_role_id: payload.activeRoleId,
+            source: 'MANUAL',
+          },
+        });
+      }
+      return dn;
+    });
+
+    return this.findOne(created.id, payload);
+  }
+
+  /**
+   * Edit a manually created note while it is still NEW. Imported notes are
+   * refreshed by the daily import instead; anything past NEW is locked.
+   */
+  async updateManual(
+    id: string,
+    dto: CreateDeliveryNoteDto,
+    payload: JwtPayload,
+  ) {
+    const dn = await this.prisma.deliveryNote.findUnique({ where: { id } });
+    if (!dn) {
+      throw new NotFoundException('Delivery note not found');
+    }
+    if (dn.current_status !== dn_status.NEW) {
+      throw new BadRequestException(
+        'Only delivery notes in New can be edited.',
+      );
+    }
+    const dnNumber = dto.dn_number.trim();
+    if (!dnNumber) {
+      throw new BadRequestException('Delivery note number is required');
+    }
+    if (dnNumber !== dn.dn_number) {
+      const dupe = await this.prisma.deliveryNote.findUnique({
+        where: { dn_number: dnNumber },
+      });
+      if (dupe) {
+        throw new ConflictException(
+          `Delivery note ${dnNumber} already exists.`,
+        );
+      }
+    }
+    if (!dto.lines?.length) {
+      throw new BadRequestException('At least one line item is required');
+    }
+    await this.assertManualRushAllowed(payload, !!dto.is_rushed);
+    const priorityNo =
+      dto.priority_no != null
+        ? await this.resolveManualPriority(payload, dto.priority_no)
+        : dn.current_priority_no;
+    const rushReason = dto.rush_reason?.trim() || null;
+    const rushChanged = !!dto.is_rushed !== dn.is_rushed;
+
+    await this.prisma.$transaction(async (tx) => {
+      const { customer, shipTo } = await this.resolveManualParties(tx, dto);
+      await tx.deliveryNote.update({
+        where: { id },
+        data: {
+          dn_number: dnNumber,
+          sold_to_code: customer.sold_to_code,
+          ship_to_code: shipTo.ship_to_code,
+          customer_id: customer.id,
+          ship_to_location_id: shipTo.id,
+          current_priority_no: priorityNo,
+          is_rushed: !!dto.is_rushed,
+          latest_rush_reason: dto.is_rushed ? rushReason : null,
+          currency_code: dto.currency_code?.trim() || 'CAD',
+          customer_po: dto.customer_po?.trim() || null,
+          po_date: this.toDateOrNull(dto.po_date),
+          requested_delivery_date: this.toDateOrNull(
+            dto.requested_delivery_date,
+          ),
+        },
+      });
+      await tx.deliveryNoteLine.deleteMany({
+        where: { delivery_note_id: id },
+      });
+      for (const row of this.manualLineRows(id, dto)) {
+        await tx.deliveryNoteLine.create({ data: row });
+      }
+      if (rushChanged) {
+        await tx.dnRushHistory.create({
+          data: {
+            delivery_note_id: id,
+            from_rushed: dn.is_rushed,
+            to_rushed: !!dto.is_rushed,
+            reason: rushReason ?? 'Rush changed on edit',
+            actor_user_id: payload.sub,
+            actor_role_id: payload.activeRoleId,
+            source: 'MANUAL',
+          },
+        });
+      }
+    });
+
+    return this.findOne(id, payload);
+  }
+
+  /**
+   * Part auto-fill for the manual DN form: most recent description + unit
+   * price used for a part number on any previous delivery note.
+   */
+  async suggestPart(code: string) {
+    const c = code.trim();
+    if (!c) return null;
+    const line = await this.prisma.deliveryNoteLine.findFirst({
+      where: { material_code: { equals: c, mode: 'insensitive' } },
+      orderBy: { created_at: 'desc' },
+      select: {
+        material_code: true,
+        material_description: true,
+        unit_price: true,
+      },
+    });
+    if (!line) return null;
+    return {
+      material_code: line.material_code,
+      material_description: line.material_description,
+      unit_price: line.unit_price != null ? String(line.unit_price) : null,
+    };
   }
 
   private async getActiveRole(payload: JwtPayload) {

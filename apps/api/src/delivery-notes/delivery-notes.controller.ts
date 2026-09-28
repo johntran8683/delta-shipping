@@ -20,6 +20,10 @@ import { DeliveryNotesService } from './delivery-notes.service';
 import { BulkTransitionDto } from './dto/bulk-transition.dto';
 import { CompletePackDto } from './dto/complete-pack.dto';
 import { ListDeliveryNotesQueryDto } from './dto/list-delivery-notes.query.dto';
+import {
+  CreateDeliveryNoteDto,
+  UpdateDeliveryNoteDto,
+} from './dto/manual-delivery-note.dto';
 import { SuggestDeliveryNotesQueryDto } from './dto/suggest-delivery-notes.query.dto';
 import { StartPackDto } from './dto/start-pack.dto';
 import { TransitionDto } from './dto/transition.dto';
@@ -41,6 +45,27 @@ export class DeliveryNotesController {
     return this.deliveryNotes.list(query, payload.sub);
   }
 
+  /** Manually create a delivery note (supervisor / team lead / CSA). */
+  @Post()
+  @RequirePermissions('dn.create')
+  createManual(
+    @Body() dto: CreateDeliveryNoteDto,
+    @CurrentPayload() payload: JwtPayload,
+  ) {
+    return this.deliveryNotes.createManual(dto, payload);
+  }
+
+  /** Edit a manually created note while it is still NEW. */
+  @Patch(':id')
+  @RequirePermissions('dn.create')
+  updateManual(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateDeliveryNoteDto,
+    @CurrentPayload() payload: JwtPayload,
+  ) {
+    return this.deliveryNotes.updateManual(id, dto, payload);
+  }
+
   @Post('bulk-transition')
   bulkTransition(
     @Body() dto: BulkTransitionDto,
@@ -52,6 +77,13 @@ export class DeliveryNotesController {
       payload,
       dto.message,
     );
+  }
+
+  /** Part auto-fill for the manual DN form (most recent description/price). */
+  @Get('part-suggestion')
+  @RequirePermissions('dn.create')
+  suggestPart(@Query('code') code: string) {
+    return this.deliveryNotes.suggestPart(code ?? '');
   }
 
   @Get('suggestions')

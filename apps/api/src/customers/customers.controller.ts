@@ -48,6 +48,12 @@ export class CustomersController {
     return this.customers.listCustomers(query);
   }
 
+  @Get(':id/ship-to-locations')
+  @RequirePermissions('customers.read')
+  listShipToLocations(@Param('id', ParseUUIDPipe) id: string) {
+    return this.customers.listShipToLocations(id);
+  }
+
   @Get(':id')
   @RequirePermissions('customers.read')
   getCustomer(@Param('id', ParseUUIDPipe) id: string) {

@@ -262,7 +262,7 @@ model DeliveryNote {
   shipping_started_by_user_id String? @db.Uuid
   /// Status the note was in before being put ON_HOLD (for resume).
   on_hold_from_status      dn_status?
-  last_seen_import_batch_id String   @db.Uuid
+  last_seen_import_batch_id String?  @db.Uuid
   /// Batch that created this note (null for pre-existing/manual notes).
   created_by_import_batch_id String? @db.Uuid
   is_open                  Boolean   @default(true)
@@ -274,7 +274,7 @@ model DeliveryNote {
   picking_started_by    User?          @relation("PickingStartedBy", fields: [picking_started_by_user_id], references: [id], onDelete: SetNull)
   packing_started_by    User?          @relation("PackingStartedBy", fields: [packing_started_by_user_id], references: [id], onDelete: SetNull)
   shipping_started_by   User?          @relation("ShippingStartedBy", fields: [shipping_started_by_user_id], references: [id], onDelete: SetNull)
-  last_seen_import_batch ImportBatch @relation("LastSeenBatch", fields: [last_seen_import_batch_id], references: [id], onDelete: Restrict)
+  last_seen_import_batch ImportBatch? @relation("LastSeenBatch", fields: [last_seen_import_batch_id], references: [id], onDelete: Restrict)
   created_by_import_batch ImportBatch? @relation("CreatedByBatch", fields: [created_by_import_batch_id], references: [id], onDelete: SetNull)
   lines                 DeliveryNoteLine[]
   status_history        DnStatusHistory[]

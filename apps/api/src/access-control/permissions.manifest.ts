@@ -42,6 +42,13 @@ export const PERMISSION_MANIFEST: PermissionManifestEntry[] = [
     sortOrder: 10,
   },
   {
+    code: 'dn.create',
+    description: 'Create delivery notes manually',
+    category: 'delivery_notes',
+    assignable: true,
+    sortOrder: 15,
+  },
+  {
     code: 'dn.status.supervise',
     description: 'Supervisor status: prioritize, hold, cancel, resume',
     category: 'delivery_notes',
@@ -135,6 +142,7 @@ export const BYPASS_MATRIX_ROLE_CODES = ['SUPERVISOR', 'SYSTEM'] as const;
 export const ROLE_PERMISSION_DEFAULTS: Record<string, string[]> = {
   SUPERVISOR: [
     'dn.read',
+    'dn.create',
     'dn.status.supervise',
     'dn.priority.set',
     'dn.rush.set',
@@ -158,11 +166,13 @@ export const ROLE_PERMISSION_DEFAULTS: Record<string, string[]> = {
     'customers.write',
     'import.shipping_ids',
     'dn.read',
+    'dn.create',
     'dn.status.supervise',
     'dn.rush.set',
   ],
   TEAM_LEAD: [
     'dn.read',
+    'dn.create',
     'dn.status.supervise',
     'dn.priority.set',
     'dn.rush.set',

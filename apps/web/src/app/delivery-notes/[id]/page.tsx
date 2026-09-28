@@ -758,6 +758,13 @@ function PackRevertDialogIcon({
   );
 }
 
+/** Supervisor / team lead / CSA may create notes, and edit them while NEW. */
+function canCreateDnActiveRole(): boolean {
+  return ["SUPERVISOR", "TEAM_LEAD", "CSA"].includes(
+    (getActiveRoleCode() ?? "").trim().toUpperCase(),
+  );
+}
+
 function isPackerActiveRole(): boolean {
   return (getActiveRoleCode() ?? "").trim().toUpperCase() === "PACKER";
 }
@@ -1599,7 +1606,7 @@ export default function DeliveryNoteDetailPage() {
       }
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3">
-        <nav className="shrink-0">
+        <nav className="flex shrink-0 items-center justify-between">
           <Link
             href="/delivery-notes"
             className="group inline-flex w-fit items-center gap-1 text-xs font-medium text-slate-500 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
@@ -1612,6 +1619,16 @@ export default function DeliveryNoteDetailPage() {
             </span>
             All notes
           </Link>
+          {detail &&
+          detail.current_status === "NEW" &&
+          canCreateDnActiveRole() ? (
+            <Link
+              href={`/delivery-notes/${detail.id}/edit`}
+              className="rounded-md border border-slate-300 px-2.5 py-1 text-[12px] font-medium text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Edit
+            </Link>
+          ) : null}
         </nav>
 
         {detail &&

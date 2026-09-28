@@ -92,6 +92,31 @@ export class CustomersService {
     };
   }
 
+  /** Ship-to locations for one customer (for the manual DN form picker). */
+  async listShipToLocations(customerId: string) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { id: true },
+    });
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+    const rows = await this.prisma.shipToLocation.findMany({
+      where: { customer_id: customerId, is_active: true },
+      orderBy: [{ ship_to_code: 'asc' }],
+      select: {
+        id: true,
+        ship_to_code: true,
+        ship_to_name: true,
+        street1: true,
+        city: true,
+        state_region: true,
+        country_code: true,
+      },
+    });
+    return { items: rows };
+  }
+
   async getCustomer(id: string) {
     const customer = await this.prisma.customer.findUnique({
       where: { id },

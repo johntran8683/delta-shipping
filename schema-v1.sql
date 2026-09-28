@@ -298,7 +298,7 @@ CREATE TABLE IF NOT EXISTS delivery_notes (
     customer_po VARCHAR(80),
     ship_to_region_state VARCHAR(120),
     picking_started_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-    last_seen_import_batch_id UUID NOT NULL REFERENCES import_batches(id) ON DELETE RESTRICT,
+    last_seen_import_batch_id UUID REFERENCES import_batches(id) ON DELETE RESTRICT,
     is_open BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()

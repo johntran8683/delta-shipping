@@ -251,6 +251,7 @@ function DeliveryNotesContent() {
   const isPicker = activeRoleCode === "PICKER";
   const isPacker = activeRoleCode === "PACKER";
   const isShipper = activeRoleCode === "SHIPPER";
+  const canCreateDn = ["SUPERVISOR", "TEAM_LEAD", "CSA"].includes(activeRoleCode);
   const [ready, setReady] = useState(false);
   const [rows, setRows] = useState<DeliveryNoteRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -1020,7 +1021,19 @@ function DeliveryNotesContent() {
     "h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900/15 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500";
 
   return (
-    <OperationsShell title="Delivery notes">
+    <OperationsShell
+      title="Delivery notes"
+      headerActions={
+        canCreateDn ? (
+          <Link
+            href="/delivery-notes/new"
+            className="rounded-md bg-slate-900 px-3 py-1.5 text-[12px] font-medium text-white shadow-sm hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+          >
+            + New delivery note
+          </Link>
+        ) : null
+      }
+    >
       <div className="space-y-2">
         <section
           aria-label="Delivery note pipeline"
