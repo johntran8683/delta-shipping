@@ -44,6 +44,16 @@ type WorkflowStatusHistoryRow = {
   actor_user: WorkflowActorRow;
 };
 
+/** Whole calendar days between `from` and today (floored at 0). */
+function calendarDayAge(from: Date, now: Date = new Date()): number {
+  const start = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.max(
+    0,
+    Math.round((end.getTime() - start.getTime()) / 86_400_000),
+  );
+}
+
 @Injectable()
 export class DeliveryNotesService {
   private readonly logger = new Logger(DeliveryNotesService.name);
@@ -221,6 +231,7 @@ export class DeliveryNotesService {
           po_date: true,
           customer_po: true,
           ship_to_region_state: true,
+          created_at: true,
         },
       }),
     ]);
@@ -358,6 +369,13 @@ export class DeliveryNotesService {
         ship_together_other_count: peerCountsById.get(row.id) ?? 0,
         /** Distinct SO numbers pulled from the DN's lines (line-level field). */
         so_numbers: soNumberById.get(row.id) ?? [],
+        /**
+         * Whole calendar days the note has been sitting in NEW
+         * (null for any other status). Lets same-status notes from
+         * different daily imports be told apart at a glance.
+         */
+        new_age_days:
+          row.current_status === 'NEW' ? calendarDayAge(row.created_at) : null,
       };
     });
 

@@ -99,6 +99,7 @@ type Detail = {
   po_date: string | null;
   customer_po: string | null;
   ship_to_region_state: string | null;
+  created_at: string;
   ship_to_location?: ShipToLocationDetail | null;
   lines: LineRow[];
   status_history: unknown[];
@@ -1166,6 +1167,18 @@ export default function DeliveryNoteDetailPage() {
     ).sort();
   }, [detail]);
 
+  /** Whole calendar days this DN has been sitting in NEW (null otherwise). */
+  const newAgeDays = useMemo(() => {
+    if (!detail || detail.current_status.trim().toUpperCase() !== "NEW")
+      return null;
+    const from = new Date(detail.created_at);
+    if (Number.isNaN(from.getTime())) return null;
+    const start = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    const now = new Date();
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.max(0, Math.round((end.getTime() - start.getTime()) / 86400000));
+  }, [detail]);
+
   const [updateStatusOpen, setUpdateStatusOpen] = useState(false);
   const [packBoxesModalMode, setPackBoxesModalMode] =
     useState<PackBoxesModalMode>("complete");
@@ -1885,6 +1898,18 @@ export default function DeliveryNoteDetailPage() {
                     completed_pack_sessions: detail.completed_pack_sessions,
                   })}
                 />
+                {newAgeDays != null ? (
+                  <span
+                    className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500"
+                    title={
+                      newAgeDays === 0
+                        ? "Imported today"
+                        : `In New for ${newAgeDays} day${newAgeDays === 1 ? "" : "s"}`
+                    }
+                  >
+                    · {newAgeDays === 0 ? "today" : `${newAgeDays}d`}
+                  </span>
+                ) : null}
                 {detail.current_priority_no != null ? (
                   <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
                     P{detail.current_priority_no}

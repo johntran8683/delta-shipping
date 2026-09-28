@@ -63,6 +63,8 @@ type DeliveryNoteRow = {
   so_numbers: string[];
   customer_po: string | null;
   po_date: string | null;
+  /** Whole calendar days sitting in NEW; null for other statuses. */
+  new_age_days: number | null;
   /** Other open DNs globally that share ship-with grouping keys (picker hint only). */
   ship_together_other_count: number;
 };
@@ -1681,13 +1683,31 @@ function DeliveryNotesContent() {
                               key={col.key}
                               className="overflow-visible whitespace-nowrap px-3 py-1.5"
                             >
-                              <StatusBadgeWithHover
-                                status={r.current_status}
-                                isOpen={r.is_open}
-                                hoverInput={{
-                                  statusContext: r.status_context ?? null,
-                                }}
-                              />
+                              <span className="inline-flex items-center">
+                                <StatusBadgeWithHover
+                                  status={r.current_status}
+                                  isOpen={r.is_open}
+                                  hoverInput={{
+                                    statusContext: r.status_context ?? null,
+                                  }}
+                                />
+                                {r.current_status === "NEW" &&
+                                r.new_age_days != null ? (
+                                  <span
+                                    className="ml-1.5 text-[11px] tabular-nums text-slate-400 dark:text-slate-500"
+                                    title={
+                                      r.new_age_days === 0
+                                        ? "Imported today"
+                                        : `In New for ${r.new_age_days} day${r.new_age_days === 1 ? "" : "s"}`
+                                    }
+                                  >
+                                    ·{" "}
+                                    {r.new_age_days === 0
+                                      ? "today"
+                                      : `${r.new_age_days}d`}
+                                  </span>
+                                ) : null}
+                              </span>
                             </td>
                           );
                         }
