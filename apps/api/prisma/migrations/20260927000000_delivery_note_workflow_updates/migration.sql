@@ -3,13 +3,13 @@
 -- 2. Remove PRIORITIZED (migrate existing rows to NEW)
 -- 3. Add packing/shipping owner tracking + on-hold resume status
 
+-- Rename IMPORTED to NEW first: 'NEW' must exist before any row is set to it
+ALTER TYPE "dn_status" RENAME VALUE 'IMPORTED' TO 'NEW';
+
 -- Migrate any PRIORITIZED rows to NEW before dropping the value
 UPDATE "delivery_notes" SET "current_status" = 'NEW' WHERE "current_status" = 'PRIORITIZED';
 UPDATE "dn_status_history" SET "from_status" = 'NEW' WHERE "from_status" = 'PRIORITIZED';
 UPDATE "dn_status_history" SET "to_status" = 'NEW' WHERE "to_status" = 'PRIORITIZED';
-
--- Rename IMPORTED to NEW
-ALTER TYPE "dn_status" RENAME VALUE 'IMPORTED' TO 'NEW';
 
 -- Drop PRIORITIZED by recreating the enum type (Postgres cannot DROP VALUE directly)
 ALTER TYPE "dn_status" RENAME TO "dn_status_old";
