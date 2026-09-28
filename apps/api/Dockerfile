@@ -10,6 +10,8 @@ WORKDIR /repo
 # the prisma CLI is needed at container start for migrations).
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json ./apps/api/package.json
+# The api postinstall runs `prisma generate`, which needs the schema present.
+COPY apps/api/prisma ./apps/api/prisma
 RUN pnpm install --frozen-lockfile --filter api
 
 # Build the API (prisma generate runs via the package postinstall).
