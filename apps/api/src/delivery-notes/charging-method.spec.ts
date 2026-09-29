@@ -1,4 +1,9 @@
-import { CHARGING_METHODS, parseChargingMethod } from './charging-method';
+import {
+  CHARGING_METHODS,
+  CHARGING_METHOD_HEADERS,
+  parseChargingMethod,
+} from './charging-method';
+import { pickCell } from '../import/excel-extract';
 
 describe('parseChargingMethod', () => {
   it('accepts each fixed-list value', () => {
@@ -33,5 +38,25 @@ describe('parseChargingMethod', () => {
     expect(() => parseChargingMethod('Bogus', 'delivery note 123')).toThrow(
       /for delivery note 123/,
     );
+  });
+});
+
+describe('charging method Excel header', () => {
+  it('recognizes the team\'s "Charging Method" header', () => {
+    expect(CHARGING_METHOD_HEADERS).toContain('Charging Method');
+  });
+
+  it('extracts the value from a row using the team header', () => {
+    const row = { 'Charging Method': 'Prepaid and Added' };
+    expect(parseChargingMethod(pickCell(row, ...CHARGING_METHOD_HEADERS))).toBe(
+      'Prepaid and Added',
+    );
+  });
+
+  it('does not confuse "Shipping Type" with the charging method column', () => {
+    const row = { 'Shipping Type': 'FedEx Ground' };
+    expect(
+      parseChargingMethod(pickCell(row, ...CHARGING_METHOD_HEADERS)),
+    ).toBeNull();
   });
 });

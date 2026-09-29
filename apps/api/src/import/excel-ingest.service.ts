@@ -5,7 +5,10 @@ import { mkdir, readFile, unlink } from 'fs/promises';
 import * as path from 'path';
 import * as XLSX from 'xlsx';
 import { PrismaService } from '../prisma/prisma.service';
-import { parseChargingMethod } from '../delivery-notes/charging-method';
+import {
+  CHARGING_METHOD_HEADERS,
+  parseChargingMethod,
+} from '../delivery-notes/charging-method';
 import {
   parsePriorityLabel,
   pickCell,
@@ -694,7 +697,7 @@ export class ExcelIngestService {
     const credit = toStr(pickCell(header, 'Credit Status'), 10);
     const shippingType = toStr(pickCell(header, 'Shipping Type'), 120);
     const chargingMethod = parseChargingMethod(
-      pickCell(header, 'Ship method'),
+      pickCell(header, ...CHARGING_METHOD_HEADERS),
       dnNumber ? `delivery note ${dnNumber}` : undefined,
     );
     const currency = toStr(pickCurrency(header), 10);

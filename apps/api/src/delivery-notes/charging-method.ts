@@ -1,12 +1,16 @@
 /**
- * Charging method for a delivery note (optional Excel "Ship method" header).
- * Fixed list agreed with the shipping team.
+ * Charging method for a delivery note.
+ * Optional Excel column; recognized headers are listed in
+ * CHARGING_METHOD_HEADERS. Fixed list agreed with the shipping team.
  */
 export const CHARGING_METHODS = [
   'Prepaid and Added',
   'Collect',
   'Prepaid but No Charge',
 ] as const;
+
+/** Excel header names recognized for the charging method column. */
+export const CHARGING_METHOD_HEADERS = ['Ship method', 'Charging Method'];
 
 export type ChargingMethod = (typeof CHARGING_METHODS)[number];
 
