@@ -150,10 +150,20 @@ export function toDecimal(value: unknown): Prisma.Decimal | null {
   if (typeof value === 'number' && !Number.isNaN(value)) {
     return new Prisma.Decimal(String(value));
   }
-  const s = String(value).trim().replace(/,/g, '');
+  let s = String(value).trim();
   if (!s || s === '-') return null;
+  // Accounting format "(1,234.50)" means negative.
+  const parenNegative = /^\(.*\)$/.test(s);
+  if (parenNegative) s = s.slice(1, -1).trim();
+  const leadingNegative = s.startsWith('-');
+  // The importer reads cells with raw:false, so currency-formatted numbers
+  // arrive as text like "$1,234.50" or "1 234.50 USD". Drop everything that
+  // is not part of the number; commas stay thousands separators.
+  s = s.replace(/[^0-9.]/g, '');
+  if (!s || s === '.') return null;
   try {
-    return new Prisma.Decimal(s);
+    const d = new Prisma.Decimal(s);
+    return parenNegative || leadingNegative ? d.negated() : d;
   } catch {
     return null;
   }

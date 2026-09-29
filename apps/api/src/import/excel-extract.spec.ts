@@ -3,7 +3,34 @@ import {
   sheetHasShipToCodeColumn,
   sheetHasSoldToCodeColumn,
   sheetHasStreetImportColumn,
+  toDecimal,
 } from './excel-extract';
+
+describe('toDecimal', () => {
+  it('parses plain numbers and numeric strings', () => {
+    expect(toDecimal(12.5)?.toString()).toBe('12.5');
+    expect(toDecimal('12.5')?.toString()).toBe('12.5');
+    expect(toDecimal('1,234.50')?.toString()).toBe('1234.5');
+  });
+
+  it('parses currency-formatted text from raw:false sheet reads', () => {
+    expect(toDecimal('$1,234.50')?.toString()).toBe('1234.5');
+    expect(toDecimal(' $2,469.00 ')?.toString()).toBe('2469');
+    expect(toDecimal('1 234.50 USD')?.toString()).toBe('1234.5');
+  });
+
+  it('handles negatives via leading minus or accounting parentheses', () => {
+    expect(toDecimal('-$1,234.50')?.toString()).toBe('-1234.5');
+    expect(toDecimal('($1,234.50)')?.toString()).toBe('-1234.5');
+  });
+
+  it('returns null for empty or unparseable input', () => {
+    expect(toDecimal(null)).toBeNull();
+    expect(toDecimal('')).toBeNull();
+    expect(toDecimal('-')).toBeNull();
+    expect(toDecimal('N/A')).toBeNull();
+  });
+});
 
 describe('pickCell', () => {
   it('does not map Ship-to Name to the Ship-to code column', () => {
