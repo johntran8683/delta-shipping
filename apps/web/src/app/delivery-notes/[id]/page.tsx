@@ -147,6 +147,7 @@ function DnCustomerCard({ detail }: { detail: Detail }) {
     ["Customer code", detail.sold_to_code || "—"],
     ["PO #", detail.customer_po?.trim() || "—"],
     ["PO date", formatDateOnly(detail.po_date)],
+    ["SO #", detail.lines[0]?.so_number?.trim() || "—"],
   ];
   return (
     <section className={infoCardCls} aria-label="Customer">
@@ -249,9 +250,6 @@ function DnLinesCard({ detail }: { detail: Detail }) {
               <th className="w-14 px-2 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Item
               </th>
-              <th className="w-24 px-2 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                SO #
-              </th>
               <th className="px-2 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Material
               </th>
@@ -269,7 +267,7 @@ function DnLinesCard({ detail }: { detail: Detail }) {
           <tbody>
             {detail.lines.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-2 py-8 text-center text-slate-500">
+                <td colSpan={5} className="px-2 py-8 text-center text-slate-500">
                   No lines.
                 </td>
               </tr>
@@ -281,9 +279,6 @@ function DnLinesCard({ detail }: { detail: Detail }) {
                 >
                   <td className="px-2 py-2 font-mono text-xs tabular-nums text-slate-500 dark:text-slate-400">
                     {l.doc_item}
-                  </td>
-                  <td className="px-2 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">
-                    {l.so_number?.trim() || "—"}
                   </td>
                   <td className="px-2 py-2">
                     <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
@@ -311,7 +306,7 @@ function DnLinesCard({ detail }: { detail: Detail }) {
           {hasAnyAmount ? (
             <tfoot>
               <tr className="border-t-2 border-[color:var(--app-border)]">
-                <td colSpan={5} className="px-2 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <td colSpan={4} className="px-2 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Total
                 </td>
                 <td className="px-2 py-2.5 text-right text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
