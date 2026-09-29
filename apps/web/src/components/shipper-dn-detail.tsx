@@ -61,6 +61,7 @@ export type WorkflowHandoff = {
 
 export type LatestShipment = {
   tracking_number: string | null;
+  invoice_number?: string | null;
   ship_date: string;
   carrier_code: string;
   shipped_by?: WorkflowActor | null;
@@ -379,6 +380,7 @@ function ShipmentInfoPanel({
   currentStatus: string;
 }) {
   const tracking = latestShipment?.tracking_number?.trim() ?? "";
+  const invoiceNumber = latestShipment?.invoice_number?.trim() ?? "";
   const isShipped = currentStatus.trim().toUpperCase() === "SHIPPED";
   const multi = notes.length > 1;
   const allPacked = notes.every(
@@ -409,6 +411,25 @@ function ShipmentInfoPanel({
                     {tracking}
                   </span>
                   <CopyValueButton value={tracking} label="tracking number" />
+                </span>
+              ) : (
+                <span className="text-sm text-slate-500 dark:text-slate-400">
+                  {isShipped ? "—" : "Enter when marking shipped"}
+                </span>
+              )}
+            </dd>
+          </div>
+          <div className="space-y-1">
+            <dt className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              Invoice number
+            </dt>
+            <dd>
+              {invoiceNumber ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="font-mono text-lg font-semibold tabular-nums tracking-tight text-slate-900 dark:text-slate-50">
+                    {invoiceNumber}
+                  </span>
+                  <CopyValueButton value={invoiceNumber} label="invoice number" />
                 </span>
               ) : (
                 <span className="text-sm text-slate-500 dark:text-slate-400">

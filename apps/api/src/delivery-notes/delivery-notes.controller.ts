@@ -174,6 +174,18 @@ export class DeliveryNotesController {
     return this.deliveryNotes.updateCompletedPacking(id, dto, payload);
   }
 
+  @Get(':id/ship-group-options')
+  @RequirePermissions('dn.read')
+  shipGroupOptions(@Param('id', ParseUUIDPipe) id: string) {
+    return this.deliveryNotes.getShipGroupOptions(id);
+  }
+
+  @Get(':id/shipping-group-members')
+  @RequirePermissions('dn.read')
+  shippingGroupMembers(@Param('id', ParseUUIDPipe) id: string) {
+    return this.deliveryNotes.getShippingGroupMembers(id);
+  }
+
   @Get(':id')
   @RequirePermissions('dn.read')
   findOne(
@@ -196,6 +208,8 @@ export class DeliveryNotesController {
       dto.message,
       dto.trackingNumber,
       dto.confirmDoubleClaim,
+      dto.shipTogetherIds,
+      dto.invoiceNumbers,
     );
   }
 

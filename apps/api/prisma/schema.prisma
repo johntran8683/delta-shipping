@@ -278,6 +278,8 @@ model DeliveryNote {
   picking_started_by_user_id String? @db.Uuid
   packing_started_by_user_id String? @db.Uuid
   shipping_started_by_user_id String? @db.Uuid
+  /// Groups notes the shipper chose to ship together (set at start-shipping).
+  shipping_group_id        String?  @db.Uuid
   /// Status the note was in before being put ON_HOLD (for resume).
   on_hold_from_status      dn_status?
   last_seen_import_batch_id String?  @db.Uuid
@@ -399,6 +401,8 @@ model Shipment {
   payment_method         String   @db.VarChar(20)
   collect_account_number String?  @db.VarChar(80)
   tracking_number        String?  @db.VarChar(80)
+  /// One invoice number per delivery note, entered when marking shipped.
+  invoice_number         String?  @db.VarChar(80)
   shipment_reference     String?  @db.VarChar(120)
   ship_date              DateTime @db.Date
   shipper_user_id        String   @db.Uuid

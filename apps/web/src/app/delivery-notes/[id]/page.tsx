@@ -116,6 +116,7 @@ type Detail = {
   matched_carrier_accounts?: { carrier_code: string; account_number: string }[];
   latest_shipment?: {
     tracking_number: string | null;
+    invoice_number?: string | null;
     ship_date: string;
     carrier_code: string;
   } | null;
@@ -925,6 +926,26 @@ export default function DeliveryNoteDetailPage() {
     null,
   );
   const [shipStartOpen, setShipStartOpen] = useState(false);
+  type ShipGroupOptionNote = {
+    id: string;
+    dn_number: string;
+    current_status: string;
+  };
+  const [shipGroupOptions, setShipGroupOptions] = useState<{
+    auto: ShipGroupOptionNote[];
+    pickable: ShipGroupOptionNote[];
+    notPacked: ShipGroupOptionNote[];
+  } | null>(null);
+  const [shipGroupOptionsLoading, setShipGroupOptionsLoading] = useState(false);
+  const [shipGroupOptionsError, setShipGroupOptionsError] = useState<
+    string | null
+  >(null);
+  const [shipPickedIds, setShipPickedIds] = useState<string[]>([]);
+  const [shipGroupMembers, setShipGroupMembers] = useState<
+    { id: string; dn_number: string }[]
+  >([]);
+  const [shipInvoices, setShipInvoices] = useState<Record<string, string>>({});
+  const [shipGroupLoading, setShipGroupLoading] = useState(false);
 
   useEffect(() => {
     setPortalMounted(true);
@@ -982,7 +1003,13 @@ export default function DeliveryNoteDetailPage() {
 
   async function runStatusTransition(
     toStatus: string,
-    opts?: { trackingNumber?: string; message?: string; confirmDoubleClaim?: boolean },
+    opts?: {
+      trackingNumber?: string;
+      message?: string;
+      confirmDoubleClaim?: boolean;
+      shipTogetherIds?: string[];
+      invoiceNumbers?: { deliveryNoteId: string; invoiceNumber: string }[];
+    },
   ): Promise<boolean> {
     const token = getAccessToken();
     if (!token) return false;
@@ -994,12 +1021,18 @@ export default function DeliveryNoteDetailPage() {
         trackingNumber?: string;
         message?: string;
         confirmDoubleClaim?: boolean;
+        shipTogetherIds?: string[];
+        invoiceNumbers?: { deliveryNoteId: string; invoiceNumber: string }[];
       } = { toStatus };
       const trimmedTracking = opts?.trackingNumber?.trim();
       if (trimmedTracking) body.trackingNumber = trimmedTracking;
       const trimmedMessage = opts?.message?.trim();
       if (trimmedMessage) body.message = trimmedMessage;
       if (opts?.confirmDoubleClaim) body.confirmDoubleClaim = true;
+      if (opts?.shipTogetherIds?.length)
+        body.shipTogetherIds = opts.shipTogetherIds;
+      if (opts?.invoiceNumbers?.length)
+        body.invoiceNumbers = opts.invoiceNumbers;
       const res = await fetch(`${apiBase}/delivery-notes/${id}/transition`, {
         method: "POST",
         headers: authHeaders(),
@@ -1138,15 +1171,84 @@ export default function DeliveryNoteDetailPage() {
     }
   }
 
+  async function loadShipGroupOptions() {
+    const token = getAccessToken();
+    if (!token || !id) return;
+    setShipGroupOptionsLoading(true);
+    setShipGroupOptionsError(null);
+    try {
+      const res = await fetch(
+        `${apiBase}/delivery-notes/${id}/ship-group-options`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setShipGroupOptionsError(
+          typeof data.message === "string"
+            ? data.message
+            : "Could not load shipping options.",
+        );
+        setShipGroupOptions(null);
+        return;
+      }
+      setShipGroupOptions({
+        auto: Array.isArray(data.auto) ? data.auto : [],
+        pickable: Array.isArray(data.pickable) ? data.pickable : [],
+        notPacked: Array.isArray(data.notPacked) ? data.notPacked : [],
+      });
+    } catch (e) {
+      setShipGroupOptionsError(
+        e instanceof Error ? e.message : "Could not load shipping options.",
+      );
+      setShipGroupOptions(null);
+    } finally {
+      setShipGroupOptionsLoading(false);
+    }
+  }
+
+  async function loadShippingGroupMembers() {
+    const token = getAccessToken();
+    if (!token || !id) return;
+    setShipGroupLoading(true);
+    try {
+      const res = await fetch(
+        `${apiBase}/delivery-notes/${id}/shipping-group-members`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const data = await res.json().catch(() => ({}));
+      const members = Array.isArray(data.members) ? data.members : [];
+      setShipGroupMembers(members);
+      setShipInvoices(
+        Object.fromEntries(members.map((m: { id: string }) => [m.id, ""])),
+      );
+    } catch {
+      setShipGroupMembers([]);
+      setShipInvoices({});
+    } finally {
+      setShipGroupLoading(false);
+    }
+  }
+
   function openMarkShippedModal() {
     setShipMarkSaveError(null);
     setShipTrackingNumber("");
+    setShipGroupMembers([]);
+    setShipInvoices({});
     setShipMarkOpen(true);
+    void loadShippingGroupMembers();
   }
 
   function closeMarkShippedModal() {
     setShipMarkOpen(false);
     setShipMarkSaveError(null);
+  }
+
+  function openShipStartModal() {
+    setShipGroupOptions(null);
+    setShipGroupOptionsError(null);
+    setShipPickedIds([]);
+    setShipStartOpen(true);
+    void loadShipGroupOptions();
   }
 
   function shipperAdvance(toStatus: string) {
@@ -1155,7 +1257,7 @@ export default function DeliveryNoteDetailPage() {
       return;
     }
     if (toStatus === "SHIPPING_IN_PROGRESS") {
-      setShipStartOpen(true);
+      openShipStartModal();
       return;
     }
     void postTransition(toStatus);
@@ -1165,8 +1267,16 @@ export default function DeliveryNoteDetailPage() {
     setShipStartOpen(false);
   }
 
+  function toggleShipPicked(id: string) {
+    setShipPickedIds((prev) =>
+      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
+    );
+  }
+
   async function confirmStartShipping() {
-    const ok = await runStatusTransition("SHIPPING_IN_PROGRESS");
+    const ok = await runStatusTransition("SHIPPING_IN_PROGRESS", {
+      shipTogetherIds: shipPickedIds,
+    });
     if (ok) closeShipStartModal();
   }
 
@@ -1176,9 +1286,22 @@ export default function DeliveryNoteDetailPage() {
       setShipMarkSaveError("Enter a tracking number.");
       return;
     }
+    const invoiceNumbers: { deliveryNoteId: string; invoiceNumber: string }[] =
+      [];
+    for (const m of shipGroupMembers) {
+      const num = (shipInvoices[m.id] ?? "").trim();
+      if (!num) {
+        setShipMarkSaveError(
+          `Enter an invoice number for ${formatDeliveryNoteNumber(m.dn_number)}.`,
+        );
+        return;
+      }
+      invoiceNumbers.push({ deliveryNoteId: m.id, invoiceNumber: num });
+    }
     setShipMarkSaveError(null);
     const ok = await runStatusTransition("SHIPPED", {
       trackingNumber: tracking,
+      invoiceNumbers,
     });
     if (ok) closeMarkShippedModal();
   }
@@ -1494,8 +1617,6 @@ export default function DeliveryNoteDetailPage() {
     detail && packRevertOpen
       ? getPackRevertDialogModel(detail, packRevertOpen.toStatus)
       : null;
-  const shipPackSessionNotes =
-    detail?.completed_pack_sessions?.[0]?.delivery_notes ?? [];
   const btnBase =
     "inline-flex items-center justify-center rounded-lg px-3 py-2 text-xs font-medium transition disabled:pointer-events-none disabled:opacity-40";
   const btnGhost =
@@ -2268,33 +2389,123 @@ export default function DeliveryNoteDetailPage() {
                     Start shipping
                   </p>
                   <h2 className="mt-1 text-base font-semibold leading-snug text-slate-900 dark:text-slate-100">
-                    Move all notes in this shipment?
+                    Ship these notes together?
                   </h2>
                   <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                    Every delivery note in the same pack session will move to
-                    Shipping in progress together.
+                    Notes packed together are always included. You can also add
+                    other packed notes for the same customer, ship-to, and ship
+                    method.
                   </p>
                 </div>
-                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-                  {shipPackSessionNotes.length > 0 ? (
-                    <ul className="space-y-1 text-[11px]">
-                      {shipPackSessionNotes.map((n) => (
-                        <li key={n.id}>
-                          <span className="font-mono font-medium text-slate-800 dark:text-slate-100">
-                            {formatDeliveryNoteNumber(n.dn_number)}
-                          </span>
-                          {n.id === detail.id ? (
-                            <span className="ml-2 text-slate-500">(this note)</span>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+                  {shipGroupOptionsLoading ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Loading shipping options…
+                    </p>
+                  ) : shipGroupOptionsError ? (
+                    <p
+                      role="alert"
+                      className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/35 dark:text-red-200"
+                    >
+                      {shipGroupOptionsError}
+                    </p>
+                  ) : shipGroupOptions ? (
+                    <>
+                      {shipGroupOptions.auto.length > 0 ? (
+                        <div>
+                          <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">
+                            Packed together — always included (
+                            {shipGroupOptions.auto.length})
+                          </p>
+                          <ul className="mt-2 space-y-1 text-[11px]">
+                            {shipGroupOptions.auto.map((n) => (
+                              <li key={n.id}>
+                                <span className="font-mono font-medium text-slate-800 dark:text-slate-100">
+                                  {formatDeliveryNoteNumber(n.dn_number)}
+                                </span>
+                                {n.id === detail.id ? (
+                                  <span className="ml-2 text-slate-500">
+                                    (this note)
+                                  </span>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {shipGroupOptions.pickable.length > 0 ? (
+                        <div>
+                          <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">
+                            Also packed — add to this shipment (
+                            {shipGroupOptions.pickable.length})
+                          </p>
+                          <ul className="mt-2 space-y-1.5">
+                            {shipGroupOptions.pickable.map((n) => {
+                              const checked = shipPickedIds.includes(n.id);
+                              return (
+                                <li key={n.id}>
+                                  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200/80 px-2.5 py-1.5 text-[11px] hover:bg-slate-50 dark:border-slate-700/80 dark:hover:bg-slate-900/40">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={busy}
+                                      onChange={() => toggleShipPicked(n.id)}
+                                      className="h-3.5 w-3.5 accent-indigo-600"
+                                    />
+                                    <span className="font-mono font-medium text-slate-800 dark:text-slate-100">
+                                      {formatDeliveryNoteNumber(n.dn_number)}
+                                    </span>
+                                  </label>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {shipGroupOptions.notPacked.length > 0 ? (
+                        <div
+                          role="alert"
+                          className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-3 py-3 dark:border-amber-900/60 dark:bg-amber-950/30"
+                        >
+                          <p className="text-xs font-semibold text-amber-900 dark:text-amber-100">
+                            {shipGroupOptions.notPacked.length} more note
+                            {shipGroupOptions.notPacked.length === 1 ? "" : "s"}{" "}
+                            for this customer / ship-to / ship method{" "}
+                            {shipGroupOptions.notPacked.length === 1
+                              ? "is"
+                              : "are"}{" "}
+                            not packed yet:
+                          </p>
+                          <p className="mt-1 font-mono text-[11px] text-amber-800 dark:text-amber-200">
+                            {shipGroupOptions.notPacked
+                              .map((n) => formatDeliveryNoteNumber(n.dn_number))
+                              .join(", ")}
+                          </p>
+                          <p className="mt-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+                            Wait for them to be packed, or ship the selected
+                            notes now?
+                          </p>
+                        </div>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
                 <div className="flex flex-wrap justify-end gap-2 border-t border-[color:var(--app-border)] px-5 py-4">
+                  {shipGroupOptions &&
+                  !shipGroupOptionsLoading &&
+                  shipGroupOptions.notPacked.length > 0 ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={closeShipStartModal}
+                      className={`${btnBase} ${btnCautionConfirm} px-4`}
+                    >
+                      Wait for them
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || shipGroupOptionsLoading}
                     onClick={closeShipStartModal}
                     className={`${btnBase} ${btnGhost} px-4`}
                   >
@@ -2302,11 +2513,19 @@ export default function DeliveryNoteDetailPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={
+                      busy || shipGroupOptionsLoading || !!shipGroupOptionsError
+                    }
                     onClick={() => void confirmStartShipping()}
                     className={`${btnBase} ${btnPrimary} px-4`}
                   >
-                    {busy ? "Working…" : "Start shipping"}
+                    {busy
+                      ? "Working…"
+                      : shipGroupOptions &&
+                          !shipGroupOptionsLoading &&
+                          shipGroupOptions.notPacked.length > 0
+                        ? "Ship selected now"
+                        : "Start shipping"}
                   </button>
                 </div>
               </div>
@@ -2341,15 +2560,14 @@ export default function DeliveryNoteDetailPage() {
                     id={shipMarkTitleId}
                     className="mt-1 text-base font-semibold leading-snug tracking-tight text-slate-900 dark:text-slate-100"
                   >
-                    Tracking number
+                    Tracking &amp; invoice numbers
                   </h2>
                   <p
                     id={shipMarkDescId}
                     className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400"
                   >
-                    One tracking number applies to the whole shipment. All
-                    delivery notes packed together in this session will be marked
-                    shipped.
+                    One tracking number applies to the whole shipment. Each
+                    delivery note needs its own invoice number.
                   </p>
                 </div>
 
@@ -2373,40 +2591,62 @@ export default function DeliveryNoteDetailPage() {
                     />
                   </div>
 
-                  {shipPackSessionNotes.length > 0 ? (
-                    <div className="rounded-xl border border-slate-200/90 bg-slate-50/80 px-3 py-3 dark:border-slate-700/80 dark:bg-slate-900/35">
-                      <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">
-                        Delivery notes in this shipment (
-                        {shipPackSessionNotes.length})
+                  <div>
+                    <p className="mb-1.5 text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">
+                      Invoice numbers ({shipGroupMembers.length})
+                    </p>
+                    {shipGroupLoading ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Loading shipment notes…
                       </p>
-                      <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-[11px]">
-                        {shipPackSessionNotes.map((n) => {
-                          const isHere = n.id === detail.id;
-                          return (
-                            <li key={n.id}>
-                              {isHere ? (
-                                <span className="flex flex-wrap items-baseline gap-2">
-                                  <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">
-                                    {formatDeliveryNoteNumber(n.dn_number)}
-                                  </span>
-                                  <span className="rounded bg-slate-200/90 px-1.5 py-0.5 text-[0.6rem] font-medium uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-                                    This note
-                                  </span>
+                    ) : shipGroupMembers.length > 0 ? (
+                      <ul className="space-y-2">
+                        {shipGroupMembers.map((n) => (
+                          <li
+                            key={n.id}
+                            className="rounded-xl border border-slate-200/90 bg-slate-50/80 px-3 py-2.5 dark:border-slate-700/80 dark:bg-slate-900/35"
+                          >
+                            <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
+                              <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">
+                                {formatDeliveryNoteNumber(n.dn_number)}
+                              </span>
+                              {n.id === detail.id ? (
+                                <span className="rounded bg-slate-200/90 px-1.5 py-0.5 text-[0.6rem] font-medium uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                                  This note
                                 </span>
-                              ) : (
-                                <Link
-                                  href={`/delivery-notes/${n.id}`}
-                                  className="font-mono text-slate-700 underline-offset-2 hover:underline dark:text-slate-300"
-                                >
-                                  {formatDeliveryNoteNumber(n.dn_number)}
-                                </Link>
-                              )}
-                            </li>
-                          );
-                        })}
+                              ) : null}
+                            </div>
+                            <label
+                              htmlFor={`ship-invoice-${n.id}`}
+                              className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300"
+                            >
+                              Invoice number{" "}
+                              <span className="text-red-600">*</span>
+                            </label>
+                            <input
+                              id={`ship-invoice-${n.id}`}
+                              type="text"
+                              autoComplete="off"
+                              maxLength={80}
+                              value={shipInvoices[n.id] ?? ""}
+                              onChange={(e) =>
+                                setShipInvoices((prev) => ({
+                                  ...prev,
+                                  [n.id]: e.target.value,
+                                }))
+                              }
+                              className={`${inputSm} font-mono text-sm`}
+                              placeholder="e.g. INV-10234"
+                            />
+                          </li>
+                        ))}
                       </ul>
-                    </div>
-                  ) : null}
+                    ) : (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        No other notes in this shipment.
+                      </p>
+                    )}
+                  </div>
 
                   {shipMarkSaveError ? (
                     <p

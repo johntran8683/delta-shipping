@@ -25,6 +25,7 @@ import {
   deliveryNoteEligibleForRush,
   rushMarkBlockedMessage,
 } from './dn-rush.policy';
+import { sameShipGroup, splitShipGroupOptions } from './ship-group.policy';
 import {
   ALL_DN_STATUSES,
   SUPERVISING_ROLES,
@@ -1303,6 +1304,7 @@ export class DeliveryNotesService {
       orderBy: { created_at: 'desc' },
       select: {
         tracking_number: true,
+        invoice_number: true,
         ship_date: true,
         carrier_code: true,
         shipper: {
@@ -1334,6 +1336,7 @@ export class DeliveryNotesService {
       latest_shipment: latestShipmentRow
         ? {
             tracking_number: latestShipmentRow.tracking_number?.trim() || null,
+            invoice_number: latestShipmentRow.invoice_number?.trim() || null,
             ship_date: latestShipmentRow.ship_date.toISOString().slice(0, 10),
             carrier_code: latestShipmentRow.carrier_code,
             shipped_by: latestShipmentRow.shipper
@@ -1352,6 +1355,8 @@ export class DeliveryNotesService {
     message?: string,
     trackingNumber?: string,
     confirmDoubleClaim?: boolean,
+    shipTogetherIds?: string[],
+    invoiceNumbers?: { deliveryNoteId: string; invoiceNumber: string }[],
   ) {
     // Warn if the shipper already has another note in SHIPPING_IN_PROGRESS.
     if (toStatus === dn_status.SHIPPING_IN_PROGRESS && !confirmDoubleClaim) {
@@ -1380,6 +1385,10 @@ export class DeliveryNotesService {
         payload,
         message,
         trackingNumber,
+        {
+          shipTogetherIds,
+          invoiceNumbers,
+        },
       );
     });
 
@@ -1387,9 +1396,12 @@ export class DeliveryNotesService {
   }
 
   /**
-   * Shipper transitions that move every DN in the latest completed pack session
-   * together (same physical shipment). Marking shipped also records one tracking
-   * number on each member's shipment row.
+   * Shipper transitions that move every DN in the shipment group together (same
+   * physical shipment). The group is the anchor's pack-session mates plus any
+   * PACKED peers the shipper picked (same customer / ship-to / ship method),
+   * recorded on delivery_notes.shipping_group_id when shipping starts.
+   * Marking shipped records one tracking number on each member's shipment row
+   * plus one required invoice number per delivery note.
    */
   private async applyShipGroupTransition(
     tx: Prisma.TransactionClient,
@@ -1398,6 +1410,10 @@ export class DeliveryNotesService {
     payload: JwtPayload,
     message?: string,
     trackingNumber?: string,
+    options?: {
+      shipTogetherIds?: string[];
+      invoiceNumbers?: { deliveryNoteId: string; invoiceNumber: string }[];
+    },
   ): Promise<void> {
     const anchor = await tx.deliveryNote.findUnique({
       where: { id: anchorId },
@@ -1423,11 +1439,40 @@ export class DeliveryNotesService {
       tx,
       anchorId,
     );
-    const memberIds =
+    const sessionMemberIds =
       packSession && packSession.memberIds.length > 0
         ? packSession.memberIds
         : [anchorId];
 
+    let memberIds: string[];
+    if (isStartShipping) {
+      const picked = await this.validateShipTogetherPeers(
+        tx,
+        anchor,
+        sessionMemberIds,
+        options?.shipTogetherIds ?? [],
+      );
+      memberIds = [...new Set([...sessionMemberIds, ...picked])];
+      if (memberIds.length > 100) {
+        throw new BadRequestException(
+          'Too many delivery notes per shipment (max 100).',
+        );
+      }
+    } else if (anchor.shipping_group_id) {
+      const grouped = await tx.deliveryNote.findMany({
+        where: { shipping_group_id: anchor.shipping_group_id },
+        select: { id: true },
+      });
+      memberIds =
+        grouped.length > 0 ? grouped.map((g) => g.id) : sessionMemberIds;
+      if (!memberIds.includes(anchorId)) {
+        memberIds = [...memberIds, anchorId];
+      }
+    } else {
+      memberIds = sessionMemberIds;
+    }
+
+    const invoiceByNoteId = new Map<string, string>();
     if (isMarkShipped) {
       const tracking = trackingNumber?.trim();
       if (!tracking) {
@@ -1438,6 +1483,26 @@ export class DeliveryNotesService {
       if (tracking.length > 80) {
         throw new BadRequestException(
           'Tracking number is too long (max 80 characters).',
+        );
+      }
+      for (const entry of options?.invoiceNumbers ?? []) {
+        const num = entry.invoiceNumber?.trim();
+        if (!num) {
+          throw new BadRequestException(
+            'Each delivery note needs an invoice number.',
+          );
+        }
+        if (num.length > 80) {
+          throw new BadRequestException(
+            'Invoice number is too long (max 80 characters).',
+          );
+        }
+        invoiceByNoteId.set(entry.deliveryNoteId, num);
+      }
+      const missing = memberIds.filter((id) => !invoiceByNoteId.has(id));
+      if (missing.length > 0) {
+        throw new BadRequestException(
+          'An invoice number is required for each delivery note in the shipment.',
         );
       }
     }
@@ -1457,7 +1522,7 @@ export class DeliveryNotesService {
     });
     if (members.length !== memberIds.length) {
       throw new BadRequestException(
-        'One or more delivery notes in the pack session were not found',
+        'One or more delivery notes in this shipment were not found',
       );
     }
 
@@ -1473,6 +1538,14 @@ export class DeliveryNotesService {
       }
     }
 
+    if (isStartShipping) {
+      // Record the chosen group so "mark shipped" moves exactly these notes.
+      await tx.deliveryNote.updateMany({
+        where: { id: { in: memberIds } },
+        data: { shipping_group_id: randomUUID() },
+      });
+    }
+
     const shipMsg =
       message?.trim() ||
       (packSession
@@ -1481,6 +1554,15 @@ export class DeliveryNotesService {
 
     for (const m of members) {
       await this.applyTransition(tx, m.id, toStatus, payload, shipMsg);
+    }
+
+    if (isReturnToPacked) {
+      // Shipping was abandoned: dissolve the group.
+      await tx.deliveryNote.updateMany({
+        where: { id: { in: memberIds } },
+        data: { shipping_group_id: null },
+      });
+      return;
     }
 
     if (!isMarkShipped) return;
@@ -1510,12 +1592,185 @@ export class DeliveryNotesService {
           payment_method: collectAccount ? 'COLLECT' : 'SENDER',
           collect_account_number: collectAccount,
           tracking_number: tracking,
+          invoice_number: invoiceByNoteId.get(m.id) ?? null,
           ship_date: new Date(),
           shipper_user_id: payload.sub,
           service_level: m.shipping_type?.trim() || null,
         },
       });
     }
+  }
+
+  /**
+   * Validates shipper-picked peers for group shipping: each must be PACKED and
+   * share the anchor's customer, ship-to, and ship method. Returns the picked
+   * ids (deduped, excluding the anchor and pack-session mates).
+   */
+  private async validateShipTogetherPeers(
+    tx: Prisma.TransactionClient,
+    anchor: {
+      id: string;
+      sold_to_code: string | null;
+      ship_to_code: string | null;
+      ship_to_location_id: string | null;
+      shipping_type: string | null;
+    },
+    sessionMemberIds: string[],
+    peerIds: string[],
+  ): Promise<string[]> {
+    const unique = [...new Set(peerIds)].filter(
+      (id) => id !== anchor.id && !sessionMemberIds.includes(id),
+    );
+    if (unique.length === 0) {
+      return [];
+    }
+    const peers = await tx.deliveryNote.findMany({
+      where: { id: { in: unique } },
+      select: {
+        id: true,
+        dn_number: true,
+        current_status: true,
+        sold_to_code: true,
+        ship_to_code: true,
+        ship_to_location_id: true,
+        shipping_type: true,
+      },
+    });
+    if (peers.length !== unique.length) {
+      throw new BadRequestException(
+        'One or more selected delivery notes were not found.',
+      );
+    }
+    const sameGroup = (p: (typeof peers)[number]) => sameShipGroup(p, anchor);
+    for (const p of peers) {
+      if (p.current_status !== dn_status.PACKED) {
+        throw new BadRequestException(
+          `${p.dn_number} is ${p.current_status} — only PACKED delivery notes can be shipped together.`,
+        );
+      }
+      if (!sameGroup(p)) {
+        throw new BadRequestException(
+          `${p.dn_number} has a different customer, ship-to, or ship method and cannot ship with this note.`,
+        );
+      }
+    }
+    return unique;
+  }
+
+  /**
+   * Options for the start-shipping picker: notes packed together with the
+   * anchor (auto-included), other PACKED notes shippable together (pickable),
+   * and notes for the same customer / ship-to / ship method that are not
+   * packed yet (the "wait or ship now" notice).
+   */
+  async getShipGroupOptions(anchorId: string) {
+    const anchor = await this.prisma.deliveryNote.findUnique({
+      where: { id: anchorId },
+      select: { id: true, current_status: true },
+    });
+    if (!anchor) {
+      throw new NotFoundException('Delivery note not found');
+    }
+    if (anchor.current_status !== dn_status.PACKED) {
+      throw new BadRequestException(
+        'Group shipping options are only available for PACKED delivery notes.',
+      );
+    }
+
+    const packSession = await this.findLatestCompletedPackSessionForNote(
+      this.prisma,
+      anchorId,
+    );
+    const sessionIds = new Set(
+      packSession && packSession.memberIds.length > 0
+        ? packSession.memberIds
+        : [anchorId],
+    );
+    const sessionNotes =
+      sessionIds.size > 0
+        ? await this.prisma.deliveryNote.findMany({
+            where: { id: { in: [...sessionIds] } },
+            select: { id: true, dn_number: true, current_status: true },
+            orderBy: { dn_number: 'asc' },
+          })
+        : [];
+
+    const peers = (await this.listShipTogetherPeers(anchorId)).items;
+    const { pickable, notPacked } = splitShipGroupOptions(peers, sessionIds);
+
+    return {
+      auto: sessionNotes.map((n) => ({
+        id: n.id,
+        dn_number: n.dn_number,
+        current_status: n.current_status as string,
+      })),
+      pickable: pickable.map((p) => ({
+        id: p.id,
+        dn_number: p.dn_number,
+        current_status: p.current_status,
+      })),
+      notPacked: notPacked.map((p) => ({
+        id: p.id,
+        dn_number: p.dn_number,
+        current_status: p.current_status,
+      })),
+    };
+  }
+
+  /**
+   * Members of the anchor's shipping group for the mark-shipped dialog:
+   * notes sharing its shipping_group_id and still SHIPPING_IN_PROGRESS
+   * (falls back to the pack session for shipments started before grouping).
+   */
+  async getShippingGroupMembers(anchorId: string) {
+    const anchor = await this.prisma.deliveryNote.findUnique({
+      where: { id: anchorId },
+      select: {
+        id: true,
+        dn_number: true,
+        current_status: true,
+        shipping_group_id: true,
+      },
+    });
+    if (!anchor) {
+      throw new NotFoundException('Delivery note not found');
+    }
+
+    let members: { id: string; dn_number: string }[];
+    if (anchor.shipping_group_id) {
+      members = await this.prisma.deliveryNote.findMany({
+        where: {
+          shipping_group_id: anchor.shipping_group_id,
+          current_status: dn_status.SHIPPING_IN_PROGRESS,
+        },
+        select: { id: true, dn_number: true },
+        orderBy: { dn_number: 'asc' },
+      });
+    } else {
+      const packSession = await this.findLatestCompletedPackSessionForNote(
+        this.prisma,
+        anchorId,
+      );
+      const ids =
+        packSession && packSession.memberIds.length > 0
+          ? packSession.memberIds
+          : [anchorId];
+      members = await this.prisma.deliveryNote.findMany({
+        where: {
+          id: { in: ids },
+          current_status: dn_status.SHIPPING_IN_PROGRESS,
+        },
+        select: { id: true, dn_number: true },
+        orderBy: { dn_number: 'asc' },
+      });
+    }
+    if (!members.some((m) => m.id === anchorId)) {
+      members = [
+        ...members,
+        { id: anchor.id, dn_number: anchor.dn_number },
+      ].sort((a, b) => a.dn_number.localeCompare(b.dn_number));
+    }
+    return { members };
   }
 
   async bulkTransition(
