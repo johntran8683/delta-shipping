@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useState, type ReactNode } from "react";
 import { DeliveryNoteNumber } from "@/components/delivery-note-number";
 import { formatDeliveryNoteNumber } from "@/lib/format-dn-number";
+import { formatDateOnly } from "@/lib/format-date";
 import { formatDnStatusLabel } from "@/lib/dn-status";
 
 type ShipToLocationDetail = {
@@ -493,7 +494,7 @@ function ShipmentInfoPanel({
                 Ship date
               </dt>
               <dd className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                {latestShipment.ship_date}
+                {formatDateOnly(latestShipment.ship_date)}
                 {latestShipment.carrier_code
                   ? ` · ${formatCarrierLabel(latestShipment.carrier_code)}`
                   : ""}

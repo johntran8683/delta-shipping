@@ -13,6 +13,7 @@ import { clearSession, getAccessToken, getActiveRoleCode } from "@/lib/auth-stor
 import { apiBase } from "@/lib/config";
 import { DeliveryNoteNumber } from "@/components/delivery-note-number";
 import { formatDeliveryNoteNumber } from "@/lib/format-dn-number";
+import { formatDateOnly } from "@/lib/format-date";
 import { type WorkflowHandoff } from "@/components/shipper-dn-detail";
 import {
   DnWorkflowRail,
@@ -145,7 +146,7 @@ function DnCustomerCard({ detail }: { detail: Detail }) {
     ["Customer", detail.sold_to_name || "—"],
     ["Customer code", detail.sold_to_code || "—"],
     ["PO #", detail.customer_po?.trim() || "—"],
-    ["PO date", detail.po_date?.trim() || "—"],
+    ["PO date", formatDateOnly(detail.po_date)],
   ];
   return (
     <section className={infoCardCls} aria-label="Customer">

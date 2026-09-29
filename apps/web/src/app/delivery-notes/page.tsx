@@ -24,6 +24,7 @@ import {
 import { apiBase } from "@/lib/config";
 import { DeliveryNoteNumber } from "@/components/delivery-note-number";
 import { formatDeliveryNoteNumber } from "@/lib/format-dn-number";
+import { formatDateOnlyCompact as formatDate } from "@/lib/format-date";
 import { DN_STATUS_OPTIONS, formatDnStatusLabel } from "@/lib/dn-status";
 import {
   COLUMN_LABELS,
@@ -123,18 +124,6 @@ type PickerChosenDn = {
   dn_number: string;
   current_status: string;
 };
-
-function formatDate(value: string | null) {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "2-digit" }),
-  });
-}
 
 function formatTotalProducts(raw: string | undefined): string {
   if (raw == null || raw === "") return "—";
