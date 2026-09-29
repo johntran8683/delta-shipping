@@ -104,11 +104,10 @@ const MANDATORY_HEADER_RULES: {
     exact: false,
     aliases: ['Shipping Type'],
   },
-  {
-    label: 'Ship method',
-    exact: false,
-    aliases: ['Ship method', 'Ship Method'],
-  },
+  // NOTE: 'Ship method' (charging method) is intentionally NOT mandatory.
+  // The team's Excel files do not have this column; when present it is
+  // parsed and validated, otherwise charging_method stays null and can be
+  // filled in on the edit screen while the DN is NEW.
 ];
 
 /**

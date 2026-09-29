@@ -51,14 +51,10 @@ describe('validateDailyDnExcelHeaders', () => {
     }
   });
 
-  it('rejects when the Ship method column is missing', () => {
+  it('accepts when the Ship method column is missing (charging method is optional on import)', () => {
     const { 'Ship method': _, ...rest } = FULL_HEADER_ROW;
     const buf = workbookBufferFromRow(rest as Record<string, unknown>);
-    const r = validateDailyDnExcelHeaders(buf);
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.missingLabels).toContain('Ship method');
-    }
+    expect(validateDailyDnExcelHeaders(buf)).toEqual({ ok: true });
   });
 
   it('accepts Shipped ATY as shipped quantity alias', () => {

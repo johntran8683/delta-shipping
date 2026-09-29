@@ -438,7 +438,7 @@ function ShipDestinationCard({
           </div>
           <div>
             <dt className="font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Ship method
+              Shipping type
             </dt>
             <dd className="mt-1 text-sm text-slate-800 dark:text-slate-100">
               {detail.shipping_type?.trim() || "—"}

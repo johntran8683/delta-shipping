@@ -1,5 +1,5 @@
 /**
- * Charging method for a delivery note (Excel "Ship method" header).
+ * Charging method for a delivery note (optional Excel "Ship method" header).
  * Fixed list agreed with the shipping team.
  */
 export const CHARGING_METHODS = [

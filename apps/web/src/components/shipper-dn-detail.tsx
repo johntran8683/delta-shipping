@@ -442,7 +442,7 @@ function ShipmentInfoPanel({
           <div className="space-y-4">
             <div className="space-y-1">
               <dt className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                Ship method
+                Shipping type
               </dt>
               <dd>
                 {shipMethod ? (
