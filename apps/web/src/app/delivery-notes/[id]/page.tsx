@@ -184,39 +184,43 @@ function DnShipToCard({ detail }: { detail: Detail }) {
   return (
     <section className={infoCardCls} aria-label="Ship to">
       <h2 className={infoCardTitleCls}>Ship to</h2>
-      <p className="mt-3 text-sm font-medium text-slate-900 dark:text-slate-100">
-        {detail.ship_to_name || "—"}
-        {detail.ship_to_code ? (
-          <span className="ml-2 font-mono text-xs font-normal text-slate-500 dark:text-slate-400">
-            {detail.ship_to_code}
-          </span>
-        ) : null}
-      </p>
-      {addrParts.length > 0 ? (
-        <p className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-          {addrParts.map((p, i) => (
-            <span key={i}>
-              {i > 0 ? <br /> : null}
-              {p}
-            </span>
+      <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+            {detail.ship_to_name || "—"}
+            {detail.ship_to_code ? (
+              <span className="ml-2 font-mono text-xs font-normal text-slate-500 dark:text-slate-400">
+                {detail.ship_to_code}
+              </span>
+            ) : null}
+          </p>
+          {addrParts.length > 0 ? (
+            <p className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+              {addrParts.map((p, i) => (
+                <span key={i}>
+                  {i > 0 ? <br /> : null}
+                  {p}
+                </span>
+              ))}
+            </p>
+          ) : null}
+        </div>
+        <dl className="grid min-w-0 content-start grid-cols-1 gap-x-6 gap-y-2.5 border-t border-[color:var(--app-border)] pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+          {shipRows.map(([label, value]) => (
+            <div key={label} className="min-w-0">
+              <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                {label}
+              </dt>
+              <dd
+                className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-slate-100"
+                title={value}
+              >
+                {value}
+              </dd>
+            </div>
           ))}
-        </p>
-      ) : null}
-      <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 border-t border-[color:var(--app-border)] pt-3 sm:grid-cols-2">
-        {shipRows.map(([label, value]) => (
-          <div key={label} className="min-w-0">
-            <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              {label}
-            </dt>
-            <dd
-              className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-slate-100"
-              title={value}
-            >
-              {value}
-            </dd>
-          </div>
-        ))}
-      </dl>
+        </dl>
+      </div>
     </section>
   );
 }
