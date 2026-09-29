@@ -59,11 +59,20 @@ type DetailPayload = {
   po_date: string | null;
   requested_delivery_date: string | null;
   currency_code: string | null;
+  shipping_type: string | null;
+  charging_method: string | null;
   is_rushed: boolean;
   latest_rush_reason: string | null;
   current_priority_no: number | null;
   lines: DetailLine[];
 };
+
+const CHARGING_METHODS = [
+  "Prepaid",
+  "Added",
+  "Collect",
+  "Prepaid but No charge",
+] as const;
 
 function inputClass(extra = "") {
   return `w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-slate-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 ${extra}`;
@@ -164,6 +173,8 @@ export function ManualDnForm({
   const [poDate, setPoDate] = useState("");
   const [requestedDate, setRequestedDate] = useState("");
   const [currency, setCurrency] = useState("CAD");
+  const [shippingType, setShippingType] = useState("");
+  const [chargingMethod, setChargingMethod] = useState("");
 
   const [lines, setLines] = useState<LineRow[]>([newLine()]);
   const [isRushed, setIsRushed] = useState(false);
@@ -226,6 +237,8 @@ export function ManualDnForm({
         setPoDate((d.po_date ?? "").slice(0, 10));
         setRequestedDate((d.requested_delivery_date ?? "").slice(0, 10));
         setCurrency(d.currency_code ?? "CAD");
+        setShippingType(d.shipping_type ?? "");
+        setChargingMethod(d.charging_method ?? "");
         setIsRushed(!!d.is_rushed);
         setRushReason(d.latest_rush_reason ?? "");
         setPriorityNo(
@@ -451,6 +464,11 @@ export function ManualDnForm({
       return "Choose a ship-to location or enter a new one.";
     if (newShipToMode && (!nsCode.trim() || !nsName.trim()))
       return "New ship-to needs a code and a name.";
+    if (!shippingType.trim()) return "Shipping type is required.";
+    if (
+      !(CHARGING_METHODS as readonly string[]).includes(chargingMethod.trim())
+    )
+      return "Choose a charging method.";
     const usable = lines.filter((l) => l.material_code.trim());
     if (!usable.length) return "Add at least one line item with a part number.";
     for (const l of usable) {
@@ -489,6 +507,8 @@ export function ManualDnForm({
         po_date: poDate || undefined,
         requested_delivery_date: requestedDate || undefined,
         currency_code: currency.trim() || undefined,
+        shipping_type: shippingType.trim(),
+        charging_method: chargingMethod.trim(),
         is_rushed: isRushed,
         rush_reason: isRushed && rushReason.trim() ? rushReason.trim() : undefined,
         lines: usable.map((l) => ({
@@ -673,6 +693,38 @@ export function ManualDnForm({
                 onChange={(e) => setCurrency(e.target.value)}
                 maxLength={10}
               />
+            </div>
+            <div>
+              <label className={labelClass()} htmlFor="shipping-type">
+                Shipping type *
+              </label>
+              <input
+                id="shipping-type"
+                className={inputClass()}
+                value={shippingType}
+                onChange={(e) => setShippingType(e.target.value)}
+                placeholder="e.g. FedEx Ground"
+                maxLength={120}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label className={labelClass()} htmlFor="charging-method">
+                Charging method *
+              </label>
+              <select
+                id="charging-method"
+                className={inputClass()}
+                value={chargingMethod}
+                onChange={(e) => setChargingMethod(e.target.value)}
+              >
+                <option value="">— Select —</option>
+                {CHARGING_METHODS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </Section>

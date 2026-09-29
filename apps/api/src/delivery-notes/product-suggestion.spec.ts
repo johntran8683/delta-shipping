@@ -157,6 +157,8 @@ describe('createManual wires product upserts', () => {
         dn_number: '  777001  ',
         customer_id: 'cust-1',
         ship_to_location_id: 'ship-1',
+        shipping_type: 'FedEx Ground',
+        charging_method: 'Prepaid',
         lines: [
           {
             material_code: ' dcw-100 ',
@@ -225,6 +227,8 @@ describe('updateManual wires product upserts', () => {
         dn_number: '777001',
         customer_id: 'cust-1',
         ship_to_location_id: 'ship-1',
+        shipping_type: 'UPS',
+        charging_method: 'Collect',
         lines: [
           {
             material_code: 'new-part-9',

@@ -26,6 +26,7 @@ import {
   rushMarkBlockedMessage,
 } from './dn-rush.policy';
 import { sameShipGroup, splitShipGroupOptions } from './ship-group.policy';
+import { parseChargingMethod } from './charging-method';
 import {
   ALL_DN_STATUSES,
   SUPERVISING_ROLES,
@@ -2543,6 +2544,8 @@ export class DeliveryNotesService {
           requested_delivery_date: this.toDateOrNull(
             dto.requested_delivery_date,
           ),
+          shipping_type: dto.shipping_type.trim() || null,
+          charging_method: parseChargingMethod(dto.charging_method),
           dn_create_date: new Date(),
         },
         select: { id: true, is_rushed: true },
@@ -2643,6 +2646,8 @@ export class DeliveryNotesService {
           requested_delivery_date: this.toDateOrNull(
             dto.requested_delivery_date,
           ),
+          shipping_type: dto.shipping_type.trim() || null,
+          charging_method: parseChargingMethod(dto.charging_method),
         },
       });
       await tx.deliveryNoteLine.deleteMany({

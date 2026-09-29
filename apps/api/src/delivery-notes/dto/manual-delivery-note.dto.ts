@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsBoolean,
   IsDateString,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -12,6 +13,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { CHARGING_METHODS } from '../charging-method';
 
 /** Inline creation of a customer when the sold-to code is not on file. */
 export class NewCustomerDto {
@@ -169,6 +171,20 @@ export class CreateDeliveryNoteDto {
   @IsString()
   @MaxLength(10)
   currency_code?: string;
+
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  shipping_type!: string;
+
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @IsNotEmpty()
+  @IsIn([...CHARGING_METHODS], {
+    message: `charging_method must be one of: ${CHARGING_METHODS.join(', ')}`,
+  })
+  charging_method!: string;
 
   @IsOptional()
   @IsBoolean()

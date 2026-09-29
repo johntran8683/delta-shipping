@@ -22,6 +22,7 @@ const FULL_HEADER_ROW: Record<string, unknown> = {
   'Material Desc.': 'Desc',
   'Ship-to Region/State': 'CA',
   'Shipping Type': 'UPS',
+  'Ship method': 'Prepaid',
 };
 
 describe('validateDailyDnExcelHeaders', () => {
@@ -47,6 +48,16 @@ describe('validateDailyDnExcelHeaders', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.missingLabels).toContain('Ship-to');
+    }
+  });
+
+  it('rejects when the Ship method column is missing', () => {
+    const { 'Ship method': _, ...rest } = FULL_HEADER_ROW;
+    const buf = workbookBufferFromRow(rest as Record<string, unknown>);
+    const r = validateDailyDnExcelHeaders(buf);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.missingLabels).toContain('Ship method');
     }
   });
 

@@ -10,6 +10,8 @@ function validPayload(): Record<string, any> {
     ship_to_location_id: '22222222-2222-4222-8222-222222222222',
     customer_po: 'PO-1',
     currency_code: 'CAD',
+    shipping_type: 'FedEx Ground',
+    charging_method: 'Prepaid',
     is_rushed: true,
     rush_reason: 'Urgent',
     lines: [
@@ -82,5 +84,30 @@ describe('CreateDeliveryNoteDto', () => {
       priority_no: 0,
     });
     expect(violations.some((v) => v.property === 'priority_no')).toBe(true);
+  });
+
+  it('rejects a missing shipping_type', async () => {
+    const p = validPayload();
+    delete (p as Record<string, unknown>).shipping_type;
+    const violations = await violationsOf(p);
+    expect(violations.some((v) => v.property === 'shipping_type')).toBe(true);
+  });
+
+  it('rejects a charging_method outside the fixed list', async () => {
+    const violations = await violationsOf({
+      ...validPayload(),
+      charging_method: 'Bill me later',
+    });
+    expect(violations.some((v) => v.property === 'charging_method')).toBe(true);
+  });
+
+  it('accepts every fixed-list charging method', async () => {
+    for (const m of ['Prepaid', 'Added', 'Collect', 'Prepaid but No charge']) {
+      const violations = await violationsOf({
+        ...validPayload(),
+        charging_method: m,
+      });
+      expect(violations).toHaveLength(0);
+    }
   });
 });

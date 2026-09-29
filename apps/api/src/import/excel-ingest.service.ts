@@ -5,6 +5,7 @@ import { mkdir, readFile, unlink } from 'fs/promises';
 import * as path from 'path';
 import * as XLSX from 'xlsx';
 import { PrismaService } from '../prisma/prisma.service';
+import { parseChargingMethod } from '../delivery-notes/charging-method';
 import {
   parsePriorityLabel,
   pickCell,
@@ -686,9 +687,16 @@ export class ExcelIngestService {
     return { customer, shipToLocation };
   }
 
-  private extractHeaderFields(header: Record<string, unknown>) {
+  private extractHeaderFields(
+    header: Record<string, unknown>,
+    dnNumber?: string,
+  ) {
     const credit = toStr(pickCell(header, 'Credit Status'), 10);
     const shippingType = toStr(pickCell(header, 'Shipping Type'), 120);
+    const chargingMethod = parseChargingMethod(
+      pickCell(header, 'Ship method'),
+      dnNumber ? `delivery note ${dnNumber}` : undefined,
+    );
     const currency = toStr(pickCurrency(header), 10);
     const dnCreate = toDateOnly(pickCell(header, 'DN Create date'));
     const reqDel = toDateOnly(pickCell(header, 'Customer Req. Delivery Date'));
@@ -706,6 +714,7 @@ export class ExcelIngestService {
     return {
       credit_status: credit,
       shipping_type: shippingType,
+      charging_method: chargingMethod,
       currency_code: currency,
       dn_create_date: dnCreate,
       requested_delivery_date: reqDel,
@@ -751,7 +760,7 @@ export class ExcelIngestService {
       where: { dn_number: dnNumber },
     });
 
-    const hf = this.extractHeaderFields(header);
+    const hf = this.extractHeaderFields(header, dnNumber);
     const { customer, shipToLocation } = await this.ensureCustomerAndShipTo(
       tx,
       header,
@@ -772,6 +781,7 @@ export class ExcelIngestService {
           last_seen_import_batch_id: batchId,
           credit_status: hf.credit_status,
           shipping_type: hf.shipping_type,
+          charging_method: hf.charging_method,
           currency_code: hf.currency_code,
           dn_create_date: hf.dn_create_date,
           requested_delivery_date: hf.requested_delivery_date,
@@ -815,6 +825,7 @@ export class ExcelIngestService {
         is_open: true,
         credit_status: hf.credit_status,
         shipping_type: hf.shipping_type,
+        charging_method: hf.charging_method,
         currency_code: hf.currency_code,
         dn_create_date: hf.dn_create_date,
         requested_delivery_date: hf.requested_delivery_date,

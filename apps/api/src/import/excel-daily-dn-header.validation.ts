@@ -104,6 +104,11 @@ const MANDATORY_HEADER_RULES: {
     exact: false,
     aliases: ['Shipping Type'],
   },
+  {
+    label: 'Ship method',
+    exact: false,
+    aliases: ['Ship method', 'Ship Method'],
+  },
 ];
 
 /**
