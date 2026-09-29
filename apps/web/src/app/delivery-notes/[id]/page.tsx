@@ -177,6 +177,10 @@ function DnShipToCard({ detail }: { detail: Detail }) {
         loc.country_name || loc.country_code,
       ].filter((p) => p && p.trim())
     : [];
+  const shipRows: Array<[string, string]> = [
+    ["Shipping type", detail.shipping_type?.trim() || "—"],
+    ["Charging method", detail.charging_method?.trim() || "—"],
+  ];
   return (
     <section className={infoCardCls} aria-label="Ship to">
       <h2 className={infoCardTitleCls}>Ship to</h2>
@@ -198,25 +202,16 @@ function DnShipToCard({ detail }: { detail: Detail }) {
           ))}
         </p>
       ) : null}
-    </section>
-  );
-}
-
-function DnShippingCard({ detail }: { detail: Detail }) {
-  const rows: Array<[string, string | null]> = [
-    ["Shipping type", detail.shipping_type?.trim() || "—"],
-    ["Charging method", detail.charging_method?.trim() || "—"],
-  ];
-  return (
-    <section className={infoCardCls} aria-label="Shipping">
-      <h2 className={infoCardTitleCls}>Shipping</h2>
-      <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
-        {rows.map(([label, value]) => (
+      <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 border-t border-[color:var(--app-border)] pt-3 sm:grid-cols-2">
+        {shipRows.map(([label, value]) => (
           <div key={label} className="min-w-0">
             <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
               {label}
             </dt>
-            <dd className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-slate-100" title={value ?? undefined}>
+            <dd
+              className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-slate-100"
+              title={value}
+            >
               {value}
             </dd>
           </div>
@@ -1806,7 +1801,6 @@ export default function DeliveryNoteDetailPage() {
             <div className="min-w-0 space-y-4">
               <DnCustomerCard detail={detail} />
               <DnShipToCard detail={detail} />
-              <DnShippingCard detail={detail} />
               <DnLinesCard detail={detail} />
             </div>
             <div className="min-w-0 xl:sticky xl:top-4">
