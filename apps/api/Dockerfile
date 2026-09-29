@@ -19,9 +19,11 @@ COPY apps/api/prisma ./apps/api/prisma
 RUN pnpm install --frozen-lockfile --filter api
 
 # Build the API (prisma generate runs via the package postinstall).
+# The entrypoint runs `node dist/main`, so fail the build loudly here if the
+# expected entry file is missing instead of shipping a crash-looping image.
 COPY apps/api ./apps/api
 COPY scripts/prisma-baseline-and-deploy.sh ./scripts/prisma-baseline-and-deploy.sh
-RUN pnpm --filter api run build
+RUN pnpm --filter api run build && test -f apps/api/dist/main.js
 
 WORKDIR /repo/apps/api
 RUN chmod +x ./docker-entrypoint.sh
