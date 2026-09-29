@@ -11,7 +11,7 @@ function validPayload(): Record<string, any> {
     customer_po: 'PO-1',
     currency_code: 'CAD',
     shipping_type: 'FedEx Ground',
-    charging_method: 'Prepaid',
+    charging_method: 'Prepaid and Added',
     is_rushed: true,
     rush_reason: 'Urgent',
     lines: [
@@ -102,7 +102,7 @@ describe('CreateDeliveryNoteDto', () => {
   });
 
   it('accepts every fixed-list charging method', async () => {
-    for (const m of ['Prepaid', 'Added', 'Collect', 'Prepaid but No charge']) {
+    for (const m of ['Prepaid and Added', 'Collect', 'Prepaid but No Charge']) {
       const violations = await violationsOf({
         ...validPayload(),
         charging_method: m,

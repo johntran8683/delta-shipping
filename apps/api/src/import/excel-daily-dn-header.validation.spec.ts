@@ -22,7 +22,7 @@ const FULL_HEADER_ROW: Record<string, unknown> = {
   'Material Desc.': 'Desc',
   'Ship-to Region/State': 'CA',
   'Shipping Type': 'UPS',
-  'Ship method': 'Prepaid',
+  'Ship method': 'Prepaid and Added',
 };
 
 describe('validateDailyDnExcelHeaders', () => {

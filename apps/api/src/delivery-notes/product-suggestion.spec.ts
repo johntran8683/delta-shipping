@@ -158,7 +158,7 @@ describe('createManual wires product upserts', () => {
         customer_id: 'cust-1',
         ship_to_location_id: 'ship-1',
         shipping_type: 'FedEx Ground',
-        charging_method: 'Prepaid',
+        charging_method: 'Prepaid and Added',
         lines: [
           {
             material_code: ' dcw-100 ',

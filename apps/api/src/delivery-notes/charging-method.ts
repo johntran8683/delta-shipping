@@ -3,10 +3,9 @@
  * Fixed list agreed with the shipping team.
  */
 export const CHARGING_METHODS = [
-  'Prepaid',
-  'Added',
+  'Prepaid and Added',
   'Collect',
-  'Prepaid but No charge',
+  'Prepaid but No Charge',
 ] as const;
 
 export type ChargingMethod = (typeof CHARGING_METHODS)[number];

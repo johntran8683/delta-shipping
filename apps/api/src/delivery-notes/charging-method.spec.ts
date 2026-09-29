@@ -8,9 +8,11 @@ describe('parseChargingMethod', () => {
   });
 
   it('matches case-insensitively and trims whitespace', () => {
-    expect(parseChargingMethod('  prepaid ')).toBe('Prepaid');
+    expect(parseChargingMethod('  prepaid and added ')).toBe(
+      'Prepaid and Added',
+    );
     expect(parseChargingMethod('PREPAID BUT NO CHARGE')).toBe(
-      'Prepaid but No charge',
+      'Prepaid but No Charge',
     );
   });
 
@@ -26,7 +28,7 @@ describe('parseChargingMethod', () => {
       /Invalid charging method "Freight collect"/,
     );
     expect(() => parseChargingMethod('Freight collect')).toThrow(
-      /Expected one of: Prepaid, Added, Collect, Prepaid but No charge/,
+      /Expected one of: Prepaid and Added, Collect, Prepaid but No Charge/,
     );
     expect(() => parseChargingMethod('Bogus', 'delivery note 123')).toThrow(
       /for delivery note 123/,

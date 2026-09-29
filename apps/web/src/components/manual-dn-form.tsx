@@ -68,10 +68,9 @@ type DetailPayload = {
 };
 
 const CHARGING_METHODS = [
-  "Prepaid",
-  "Added",
+  "Prepaid and Added",
   "Collect",
-  "Prepaid but No charge",
+  "Prepaid but No Charge",
 ] as const;
 
 function inputClass(extra = "") {
