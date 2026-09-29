@@ -978,7 +978,7 @@ export function OperationsShell({
         </aside>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:min-h-screen">
-          <header className="hidden border-b border-[var(--app-border)] bg-[var(--app-surface)]/80 px-6 py-3 backdrop-blur-sm md:block">
+          <header className="relative z-30 hidden border-b border-[var(--app-border)] bg-[var(--app-surface)]/80 px-6 py-3 backdrop-blur-sm md:block">
             <div className="flex items-center justify-end">
               <AccountMenu
                 me={me}
