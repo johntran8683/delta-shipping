@@ -1817,6 +1817,9 @@ export default function DeliveryNoteDetailPage() {
                 busy={busy}
                 onPrimaryAction={handleRailPrimaryAction}
                 onTransition={supervisorStatusTransition}
+                onUnpack={() => {
+                  void postTransition("PICKED");
+                }}
                 onPrioritySave={savePriorityFromModal}
                 onRushSave={saveRushFromModal}
                 handoff={detail.workflow_handoff}

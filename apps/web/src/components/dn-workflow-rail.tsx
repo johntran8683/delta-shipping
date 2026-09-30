@@ -43,6 +43,8 @@ export type DnWorkflowRailProps = {
   busy: boolean;
   onPrimaryAction: (key: PrimaryActionKey) => void;
   onTransition: (toStatus: string, message: string) => Promise<boolean>;
+  /** Packer-only: opens the existing pack-revert confirmation for PACKED → PICKED. */
+  onUnpack?: () => void;
   onPrioritySave: (toPriorityNo: number, reason: string) => Promise<boolean>;
   onRushSave: (rushed: boolean, reason: string) => Promise<boolean>;
   handoff?: RailHandoff | null;
@@ -429,6 +431,7 @@ export function DnWorkflowRail(props: DnWorkflowRailProps) {
     busy,
     onPrimaryAction,
     onTransition,
+    onUnpack,
     onPrioritySave,
     onRushSave,
     handoff,
@@ -437,6 +440,11 @@ export function DnWorkflowRail(props: DnWorkflowRailProps) {
 
   const s = normStatus(status);
   const allowed = new Set(allowedNextStatuses.map((x) => normStatus(x)));
+
+  /* Packer-only full undo of a completed pack: only on PACKED notes. */
+  const canUnpack = allowed.has("PICKED");
+  const showUnpack =
+    s === "PACKED" && isPackerRole() && onUnpack != null;
 
   const [reasonTarget, setReasonTarget] = useState<
     "ON_HOLD" | "CANCELLED" | "RESUME" | null
@@ -605,6 +613,28 @@ export function DnWorkflowRail(props: DnWorkflowRailProps) {
           <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
             Shipped — this note is complete.
           </p>
+        ) : null}
+
+        {showUnpack ? (
+          <div className="mt-2">
+            <button
+              type="button"
+              disabled={busy || !canUnpack}
+              title={
+                canUnpack
+                  ? "Delete the pack session and all its boxes — every note in the pack returns to Picked"
+                  : "Unpack is not available for this note"
+              }
+              onClick={() => onUnpack?.()}
+              className={`${btnBase} ${btnDangerSecondary} w-full`}
+            >
+              Unpack
+            </button>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+              Removes the completed pack and all its boxes. Asks for
+              confirmation first.
+            </p>
+          </div>
         ) : null}
 
         <div className="mt-4 border-t border-[color:var(--app-border)] pt-3">
