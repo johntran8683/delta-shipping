@@ -113,6 +113,7 @@ type Detail = {
   packing_combine_peers?: { items: PackPeerRow[] };
   active_pack_session?: ActivePackSession | null;
   completed_pack_sessions?: CompletedPackSession[];
+  shipping_group_notes?: { id: string; dn_number: string }[];
   customer_email?: string | null;
   fed_id_number?: string | null;
   matched_carrier_accounts?: { carrier_code: string; account_number: string }[];
@@ -678,6 +679,19 @@ function getPackRevertDialogModelFromStatuses(
       confirmLabel: "Remove pack and go to picked",
     };
   }
+  if (from === "SHIPPING_IN_PROGRESS" && to === "PACKED") {
+    return {
+      toStatus,
+      title: "Return this shipment to packed?",
+      bullets: [
+        "Every delivery note in this shipment returns to PACKED.",
+        "The shipping group is dissolved — rebuild it with Start shipping after your changes.",
+        "Packed boxes are kept; nothing needs to be repacked.",
+      ],
+      severity: "standard",
+      confirmLabel: "Return to packed",
+    };
+  }
   return null;
 }
 
@@ -702,6 +716,8 @@ function getPackRevertDialogModel(
     (from === "PACKED" && to === "PICKED")
   ) {
     affectedNotes = detail.completed_pack_sessions?.[0]?.delivery_notes ?? [];
+  } else if (from === "SHIPPING_IN_PROGRESS" && to === "PACKED") {
+    affectedNotes = detail.shipping_group_notes ?? [];
   }
 
   const n = affectedNotes.length;
@@ -1819,6 +1835,9 @@ export default function DeliveryNoteDetailPage() {
                 onTransition={supervisorStatusTransition}
                 onUnpack={() => {
                   void postTransition("PICKED");
+                }}
+                onReturnToPacked={() => {
+                  void postTransition("PACKED");
                 }}
                 onPrioritySave={savePriorityFromModal}
                 onRushSave={saveRushFromModal}

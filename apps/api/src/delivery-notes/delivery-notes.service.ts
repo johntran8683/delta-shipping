@@ -1322,6 +1322,14 @@ export class DeliveryNotesService {
       shipper: latestShipmentRow?.shipper ?? null,
     });
 
+    const shippingGroupNotes = dn.shipping_group_id
+      ? await this.prisma.deliveryNote.findMany({
+          where: { shipping_group_id: dn.shipping_group_id },
+          select: { id: true, dn_number: true },
+          orderBy: { dn_number: 'asc' },
+        })
+      : [];
+
     return {
       ...serialized,
       customer_email: dn.customer?.default_email?.trim() || null,
@@ -1334,6 +1342,7 @@ export class DeliveryNotesService {
       packing_combine_peers: packingCombinePeers,
       active_pack_session: activePackSession,
       completed_pack_sessions: completedPackSessions,
+      shipping_group_notes: shippingGroupNotes,
       latest_shipment: latestShipmentRow
         ? {
             tracking_number: latestShipmentRow.tracking_number?.trim() || null,

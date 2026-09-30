@@ -45,6 +45,8 @@ export type DnWorkflowRailProps = {
   onTransition: (toStatus: string, message: string) => Promise<boolean>;
   /** Packer-only: opens the existing pack-revert confirmation for PACKED → PICKED. */
   onUnpack?: () => void;
+  /** Shipper-only: opens the step-back confirmation for SHIPPING_IN_PROGRESS → PACKED. */
+  onReturnToPacked?: () => void;
   onPrioritySave: (toPriorityNo: number, reason: string) => Promise<boolean>;
   onRushSave: (rushed: boolean, reason: string) => Promise<boolean>;
   handoff?: RailHandoff | null;
@@ -67,6 +69,10 @@ function activeRoleCode(): string {
 
 function isPackerRole(): boolean {
   return activeRoleCode() === "PACKER";
+}
+
+function isShipperRole(): boolean {
+  return activeRoleCode() === "SHIPPER";
 }
 
 function actorLabel(actor: RailActor): string | null {
@@ -432,6 +438,7 @@ export function DnWorkflowRail(props: DnWorkflowRailProps) {
     onPrimaryAction,
     onTransition,
     onUnpack,
+    onReturnToPacked,
     onPrioritySave,
     onRushSave,
     handoff,
@@ -445,6 +452,13 @@ export function DnWorkflowRail(props: DnWorkflowRailProps) {
   const canUnpack = allowed.has("PICKED");
   const showUnpack =
     s === "PACKED" && isPackerRole() && onUnpack != null;
+
+  /* Shipper-only step back of a shipment: only on SHIPPING_IN_PROGRESS notes. */
+  const canReturnToPacked = allowed.has("PACKED");
+  const showReturnToPacked =
+    s === "SHIPPING_IN_PROGRESS" &&
+    isShipperRole() &&
+    onReturnToPacked != null;
 
   const [reasonTarget, setReasonTarget] = useState<
     "ON_HOLD" | "CANCELLED" | "RESUME" | null
@@ -633,6 +647,28 @@ export function DnWorkflowRail(props: DnWorkflowRailProps) {
             <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
               Removes the completed pack and all its boxes. Asks for
               confirmation first.
+            </p>
+          </div>
+        ) : null}
+
+        {showReturnToPacked ? (
+          <div className="mt-2">
+            <button
+              type="button"
+              disabled={busy || !canReturnToPacked}
+              title={
+                canReturnToPacked
+                  ? "Dissolve this shipment — every note in it returns to Packed"
+                  : "Return to packed is not available for this note"
+              }
+              onClick={() => onReturnToPacked?.()}
+              className={`${btnBase} ${btnSecondary} w-full`}
+            >
+              Return to packed
+            </button>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+              Moves the whole shipment back to Packed so it can be modified.
+              Asks for confirmation first.
             </p>
           </div>
         ) : null}
