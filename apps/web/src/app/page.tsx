@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AuthBrandHeader } from "@/components/auth-shell";
 import { SignInForm } from "@/components/sign-in-form";
+import { HomeGreeting } from "@/components/home-greeting";
 
 function IconDelivery({ className }: { className?: string }) {
   return (
@@ -66,18 +67,19 @@ function IconShield({ className }: { className?: string }) {
 const highlights = [
   {
     Icon: IconDelivery,
-    title: "Delivery notes",
-    caption: "Queue, priorities, and status workflow",
+    title: "Today's queue",
+    caption: "New notes, rush orders, and priorities at a glance.",
   },
   {
     Icon: IconSheet,
-    title: "Daily imports",
-    caption: "Structured spreadsheet ingestion",
+    title: "Excel imports",
+    caption:
+      "The daily workbook lands here, lines, prices, and ship methods included.",
   },
   {
     Icon: IconShield,
-    title: "Role-based access",
-    caption: "Permissions aligned to your assignment",
+    title: "Your role, your view",
+    caption: "What you see matches what you do: pick, pack, lead, or support.",
   },
 ] as const;
 
@@ -97,22 +99,14 @@ export default function Home() {
           <div className="mx-auto grid w-full max-w-5xl gap-12 lg:grid-cols-[1fr_minmax(0,26rem)] lg:items-center lg:gap-16">
             <div className="max-w-xl lg:mx-0">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                Internal workspace
+                Delta Shipping · Internal
               </p>
-              <h1 className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[1.65rem] font-semibold leading-snug tracking-tight text-slate-900 sm:text-3xl lg:text-[2rem] dark:text-white">
-                <span
-                  className="size-0 border-y-[6px] border-l-[9px] border-y-transparent border-l-[var(--app-brand)]"
-                  aria-hidden
-                />
-                <span>
-                  Coordinate shipments with{" "}
-                  <span className="text-[var(--app-brand)]">clarity</span> and
-                  control.
-                </span>
+              <h1 className="mt-3 text-[1.65rem] font-semibold leading-snug tracking-tight text-slate-900 sm:text-3xl lg:text-[2rem] dark:text-white">
+                <HomeGreeting />
               </h1>
               <p className="mt-4 text-sm leading-relaxed text-slate-600 sm:text-[0.9375rem] dark:text-slate-400">
-                Sign in to work delivery notes, supervisor priorities, and
-                supervised imports—scoped to what your role allows.
+                Sign in to find your delivery notes, priorities, and
+                imports — all in one place, matched to your role.
               </p>
 
               <ul className="mt-9 space-y-4 border-t border-[color:var(--app-border)] pt-8">
@@ -151,15 +145,11 @@ export default function Home() {
             >
               <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] shadow-[0_1px_2px_rgb(0_0_0/0.04),0_20px_40px_-24px_rgb(0_0_0/0.12)]">
                 <div className="border-b border-[var(--app-border)] bg-slate-50/80 px-7 py-5 dark:bg-slate-900/30">
-                  <h2 className="flex items-center gap-2.5 text-base font-semibold tracking-tight text-slate-900 dark:text-white">
-                    <span
-                      className="size-0 border-y-[5px] border-l-[7px] border-y-transparent border-l-[var(--app-brand)]"
-                      aria-hidden
-                    />
+                  <h2 className="text-base font-semibold tracking-tight text-slate-900 dark:text-white">
                     Sign in
                   </h2>
-                  <p className="mt-2 pl-[1.125rem] text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                    Use your organization email and password.
+                  <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                    Welcome back — use your organization email and password.
                   </p>
                 </div>
                 <div className="px-7 py-7">
