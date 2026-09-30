@@ -130,7 +130,19 @@ function carrierAccountsMessage(
   return `No ${inferredCarrierFromShipMethod(ship)} account on file for this customer.`;
 }
 
-function sumBoxWeightsLb(boxes: Pick<PackBox, "weight_lb">[]): string | null {
+/** Pounds per kilogram conversion used for the dual-unit package weight display. */
+const LB_TO_KG = 0.45359237;
+
+function formatDecimal(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function sumBoxWeightNumbers(
+  boxes: Pick<PackBox, "weight_lb">[],
+): { lb: number; kg: number } | null {
   if (boxes.length === 0) return null;
   let sum = 0;
   let anyValid = false;
@@ -141,8 +153,47 @@ function sumBoxWeightsLb(boxes: Pick<PackBox, "weight_lb">[]): string | null {
     anyValid = true;
   }
   if (!anyValid) return null;
-  const rounded = Math.round(sum * 100) / 100;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.?0+$/, "");
+  return { lb: sum, kg: sum * LB_TO_KG };
+}
+
+function sumBoxWeightsLb(boxes: Pick<PackBox, "weight_lb">[]): string | null {
+  const totals = sumBoxWeightNumbers(boxes);
+  return totals == null ? null : formatDecimal(totals.lb);
+}
+
+function sumBoxWeightsKg(boxes: Pick<PackBox, "weight_lb">[]): string | null {
+  const totals = sumBoxWeightNumbers(boxes);
+  return totals == null ? null : formatDecimal(totals.kg);
+}
+
+/** "24×18×12" for display, or null when any dimension is missing. */
+function formatBoxSizeDisplay(
+  box: Pick<PackBox, "length_in" | "width_in" | "height_in">,
+): string | null {
+  const l = box.length_in.trim();
+  const w = box.width_in.trim();
+  const h = box.height_in.trim();
+  if (!l || !w || !h) return null;
+  return `${l}×${w}×${h}`;
+}
+
+/**
+ * Copy text for the box sizes only (plain "x" separators for pasting):
+ * "Box sizes (in): 24x18x12, 20x16x10". Empty when no box has dimensions.
+ */
+function buildBoxSizesCopyText(
+  boxes: Pick<PackBox, "length_in" | "width_in" | "height_in">[],
+): string {
+  const sizes: string[] = [];
+  for (const b of boxes) {
+    const l = b.length_in.trim();
+    const w = b.width_in.trim();
+    const h = b.height_in.trim();
+    if (!l || !w || !h) continue;
+    sizes.push(`${l}x${w}x${h}`);
+  }
+  if (sizes.length === 0) return "";
+  return `Box sizes (in): ${sizes.join(", ")}`;
 }
 
 function countryDisplay(loc: ShipToLocationDetail): string {
@@ -189,16 +240,6 @@ function buildCarrierAccountsCopyText(accounts: CarrierAccountRow[]): string {
   return accounts
     .map((a) => `${formatCarrierLabel(a.carrier_code)}: ${a.account_number}`)
     .join("\n");
-}
-
-function buildPackShipmentCopyText(
-  boxCount: number,
-  totalWeightLb: string | null,
-): string {
-  if (boxCount <= 0) return "";
-  const parts = [`${boxCount} box${boxCount === 1 ? "" : "es"}`];
-  if (totalWeightLb != null) parts.push(`${totalWeightLb} lb total`);
-  return parts.join(", ");
 }
 
 function EmptyValue() {
@@ -361,6 +402,7 @@ function ShipmentInfoPanel({
   packNote,
   boxes,
   totalWeightLb,
+  totalWeightKg,
   shipMethod,
   carrierAccounts,
   carrierMsg,
@@ -373,6 +415,7 @@ function ShipmentInfoPanel({
   packNote?: string;
   boxes: PackBox[];
   totalWeightLb: string | null;
+  totalWeightKg: string | null;
   shipMethod: string;
   carrierAccounts: CarrierAccountRow[];
   carrierMsg: string;
@@ -387,7 +430,15 @@ function ShipmentInfoPanel({
   const allPacked = notes.every(
     (n) => (n.current_status ?? "").trim().toUpperCase() === "PACKED",
   );
-  const packCopyText = buildPackShipmentCopyText(boxes.length, totalWeightLb);
+  const boxCount = boxes.length;
+  const weightText =
+    totalWeightLb != null
+      ? ` · ${totalWeightLb} lb${totalWeightKg != null ? ` (${totalWeightKg} kg)` : ""} total`
+      : "";
+  const sizeDisplays = boxes
+    .map((b) => formatBoxSizeDisplay(b))
+    .filter((s): s is string => s != null);
+  const boxSizesCopyText = buildBoxSizesCopyText(boxes);
 
   return (
     <section
@@ -501,17 +552,23 @@ function ShipmentInfoPanel({
               </dd>
             </div>
           ) : null}
-          {packCopyText ? (
+          {boxCount > 0 ? (
             <div className="space-y-1 sm:col-span-2">
               <dt className="text-xs font-medium text-slate-500 dark:text-slate-400">
                 Packages
               </dt>
-              <dd className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                  {packCopyText}
-                </span>
-                <CopyTextButton value={packCopyText} label="package summary" />
+              <dd className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                {boxCount} box{boxCount === 1 ? "" : "es"}
+                {weightText}
               </dd>
+              {sizeDisplays.length > 0 ? (
+                <dd className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm text-slate-700 dark:text-slate-300">
+                    Sizes (in): {sizeDisplays.join(", ")}
+                  </span>
+                  <CopyTextButton value={boxSizesCopyText} label="box sizes" />
+                </dd>
+              ) : null}
             </div>
           ) : null}
         </dl>
@@ -665,6 +722,7 @@ export function ShipperDnDetailWorkspace({
   const packSession = detail.completed_pack_sessions?.[0];
   const boxes = packSession?.boxes ?? [];
   const totalWeightLb = sumBoxWeightsLb(boxes);
+  const totalWeightKg = sumBoxWeightsKg(boxes);
   const packNote = packSession?.pack_completion_note?.trim();
   const shipmentNotes = packSession?.delivery_notes ?? [];
   const loc = detail.ship_to_location;
@@ -680,10 +738,14 @@ export function ShipperDnDetailWorkspace({
   const carrierAccounts = detail.matched_carrier_accounts ?? [];
   const carrierMsg = carrierAccountsMessage(detail.shipping_type, carrierAccounts);
   const carrierCopyText = buildCarrierAccountsCopyText(carrierAccounts);
-  const packCopyText = buildPackShipmentCopyText(boxes.length, totalWeightLb);
+  const boxSizesCopyText = buildBoxSizesCopyText(boxes);
   const packSummary =
     boxes.length > 0
-      ? `${boxes.length} box${boxes.length === 1 ? "" : "es"}${totalWeightLb != null ? ` · ${totalWeightLb} lb total` : ""}`
+      ? `${boxes.length} box${boxes.length === 1 ? "" : "es"}${
+          totalWeightLb != null
+            ? ` · ${totalWeightLb} lb${totalWeightKg != null ? ` (${totalWeightKg} kg)` : ""} total`
+            : ""
+        }`
       : undefined;
 
   return (
@@ -694,6 +756,7 @@ export function ShipperDnDetailWorkspace({
         packNote={packNote}
         boxes={boxes}
         totalWeightLb={totalWeightLb}
+        totalWeightKg={totalWeightKg}
         shipMethod={shipMethod}
         carrierAccounts={carrierAccounts}
         carrierMsg={carrierMsg}
@@ -711,9 +774,9 @@ export function ShipperDnDetailWorkspace({
             meta={boxes.length > 0 ? String(boxes.length) : undefined}
             className="lg:col-span-1"
           >
-            {packCopyText ? (
+            {boxSizesCopyText ? (
               <div className="mb-3">
-                <CopyTextButton value={packCopyText} label="box summary" />
+                <CopyTextButton value={boxSizesCopyText} label="box sizes" />
               </div>
             ) : null}
             {boxes.length > 0 ? (
@@ -764,6 +827,11 @@ export function ShipperDnDetailWorkspace({
                 <span className="font-mono text-base font-semibold tabular-nums text-slate-900 dark:text-slate-50">
                   {totalWeightLb}
                   <span className="ml-1 text-sm font-medium text-slate-500">lb</span>
+                  {totalWeightKg != null ? (
+                    <span className="ml-2 text-sm font-medium text-slate-500">
+                      ({totalWeightKg} kg)
+                    </span>
+                  ) : null}
                 </span>
               </div>
             ) : null}
