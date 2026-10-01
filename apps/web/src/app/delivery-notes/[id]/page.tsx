@@ -151,34 +151,33 @@ function formatMoney(value: string | null, currency: string | null): string {
   return currency ? `${currency} ${formatted}` : formatted;
 }
 
-function DnCustomerCard({ detail }: { detail: Detail }) {
-  const rows: Array<[string, string | null]> = [
-    ["Customer", detail.sold_to_name || "—"],
-    ["Customer code", detail.sold_to_code || "—"],
-    ["PO #", detail.customer_po?.trim() || "—"],
-    ["PO date", formatDateOnly(detail.po_date)],
-    ["SO #", detail.lines[0]?.so_number?.trim() || "—"],
-  ];
+function InfoField({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
   return (
-    <section className={infoCardCls} aria-label="Customer">
-      <h2 className={infoCardTitleCls}>Customer</h2>
-      <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
-        {rows.map(([label, value]) => (
-          <div key={label} className="min-w-0">
-            <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              {label}
-            </dt>
-            <dd className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-slate-100" title={value ?? undefined}>
-              {value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </section>
+    <div className="min-w-0">
+      <dt className="text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+        {label}
+      </dt>
+      <dd
+        className={`mt-0.5 truncate text-[13px] font-medium text-slate-900 dark:text-slate-100 ${
+          mono ? "font-mono tabular-nums" : ""
+        }`}
+        title={value}
+      >
+        {value}
+      </dd>
+    </div>
   );
 }
 
-function DnShipToCard({ detail }: { detail: Detail }) {
+function DnShipmentInfoCard({ detail }: { detail: Detail }) {
   const loc = detail.ship_to_location;
   const addrParts = loc
     ? [
@@ -189,16 +188,41 @@ function DnShipToCard({ detail }: { detail: Detail }) {
         loc.country_name || loc.country_code,
       ].filter((p) => p && p.trim())
     : [];
-  const shipRows: Array<[string, string]> = [
-    ["Shipping type", detail.shipping_type?.trim() || "—"],
-    ["Charging method", detail.charging_method?.trim() || "—"],
-  ];
   return (
-    <section className={infoCardCls} aria-label="Ship to">
-      <h2 className={infoCardTitleCls}>Ship to</h2>
-      <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <section className={infoCardCls} aria-label="Shipment information">
+      <h2 className={infoCardTitleCls}>Shipment information</h2>
+      <div className="mt-2.5 grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+          <p
+            className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
+            title={detail.sold_to_name ?? undefined}
+          >
+            {detail.sold_to_name || "—"}
+            {detail.sold_to_code ? (
+              <span className="ml-2 font-mono text-xs font-normal text-slate-500 dark:text-slate-400">
+                {detail.sold_to_code}
+              </span>
+            ) : null}
+          </p>
+          <dl className="mt-2 grid grid-cols-3 gap-x-4 gap-y-2">
+            <InfoField
+              label="PO #"
+              value={detail.customer_po?.trim() || "—"}
+              mono
+            />
+            <InfoField label="PO date" value={formatDateOnly(detail.po_date)} />
+            <InfoField
+              label="SO #"
+              value={detail.lines[0]?.so_number?.trim() || "—"}
+              mono
+            />
+          </dl>
+        </div>
+        <div className="min-w-0">
+          <p
+            className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
+            title={detail.ship_to_name ?? undefined}
+          >
             {detail.ship_to_name || "—"}
             {detail.ship_to_code ? (
               <span className="ml-2 font-mono text-xs font-normal text-slate-500 dark:text-slate-400">
@@ -207,7 +231,7 @@ function DnShipToCard({ detail }: { detail: Detail }) {
             ) : null}
           </p>
           {addrParts.length > 0 ? (
-            <p className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+            <p className="mt-1 text-[13px] leading-snug text-slate-600 dark:text-slate-300">
               {addrParts.map((p, i) => (
                 <span key={i}>
                   {i > 0 ? <br /> : null}
@@ -217,22 +241,17 @@ function DnShipToCard({ detail }: { detail: Detail }) {
             </p>
           ) : null}
         </div>
-        <dl className="grid min-w-0 content-start grid-cols-1 gap-x-6 gap-y-2.5 border-t border-[color:var(--app-border)] pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-          {shipRows.map(([label, value]) => (
-            <div key={label} className="min-w-0">
-              <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                {label}
-              </dt>
-              <dd
-                className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-slate-100"
-                title={value}
-              >
-                {value}
-              </dd>
-            </div>
-          ))}
-        </dl>
       </div>
+      <dl className="mt-2.5 grid grid-cols-2 gap-x-8 gap-y-2 border-t border-[color:var(--app-border)] pt-2.5">
+        <InfoField
+          label="Shipping type"
+          value={detail.shipping_type?.trim() || "—"}
+        />
+        <InfoField
+          label="Charging method"
+          value={detail.charging_method?.trim() || "—"}
+        />
+      </dl>
     </section>
   );
 }
@@ -253,23 +272,23 @@ function DnLinesCard({ detail }: { detail: Detail }) {
           {detail.lines.length} line{detail.lines.length === 1 ? "" : "s"}
         </span>
       </div>
-      <div className="mt-3 overflow-x-auto">
+      <div className="mt-2 overflow-x-auto">
         <table className="w-full min-w-[640px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-[color:var(--app-border)] text-left">
-              <th className="w-14 px-2 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              <th className="w-14 px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Item
               </th>
-              <th className="px-2 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              <th className="px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Material
               </th>
-              <th className="w-28 px-2 py-2 text-right text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              <th className="w-28 px-2 py-1.5 text-right text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Unit price
               </th>
-              <th className="w-20 px-2 py-2 text-right text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              <th className="w-20 px-2 py-1.5 text-right text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Qty
               </th>
-              <th className="w-32 px-2 py-2 text-right text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              <th className="w-32 px-2 py-1.5 text-right text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Amount
               </th>
             </tr>
@@ -287,10 +306,10 @@ function DnLinesCard({ detail }: { detail: Detail }) {
                   key={l.id}
                   className="border-b border-slate-100 align-top last:border-0 dark:border-slate-800"
                 >
-                  <td className="px-2 py-2 font-mono text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                  <td className="px-2 py-1.5 font-mono text-xs tabular-nums text-slate-500 dark:text-slate-400">
                     {l.doc_item}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-1.5">
                     <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
                       {l.material_code ?? "—"}
                     </span>
@@ -300,13 +319,13 @@ function DnLinesCard({ detail }: { detail: Detail }) {
                       </span>
                     ) : null}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-600 dark:text-slate-300">
                     {formatMoney(l.unit_price, null)}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-slate-800 dark:text-slate-100">
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-800 dark:text-slate-100">
                     {l.shipped_qty ?? "—"}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">
+                  <td className="px-2 py-1.5 text-right tabular-nums font-medium text-slate-800 dark:text-slate-100">
                     {formatMoney(l.line_amount, null)}
                   </td>
                 </tr>
@@ -354,7 +373,7 @@ function CombinedPackSessionBanner({
 
   return (
     <section
-      className="print:hidden mb-6 rounded-lg border border-slate-200/90 bg-slate-50/40 px-4 py-3.5 dark:border-slate-700/70 dark:bg-slate-900/20 sm:px-5"
+      className="print:hidden rounded-lg border border-slate-200/90 bg-slate-50/40 px-4 py-3.5 dark:border-slate-700/70 dark:bg-slate-900/20 sm:px-5"
       aria-label={
         notes.length > 1
           ? "Delivery notes in this combined pack session"
@@ -688,7 +707,7 @@ function CompletedPackResultBanner({
 
   return (
     <section
-      className="print:hidden mb-6 rounded-lg border border-slate-200/90 bg-slate-50/40 px-4 py-3.5 dark:border-slate-700/70 dark:bg-slate-900/20 sm:px-5"
+      className="print:hidden rounded-lg border border-slate-200/90 bg-slate-50/40 px-4 py-3.5 dark:border-slate-700/70 dark:bg-slate-900/20 sm:px-5"
       aria-label="Completed pack session, combined delivery notes, and boxes"
     >
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
@@ -2005,54 +2024,50 @@ export default function DeliveryNoteDetailPage() {
           ) : null}
         </nav>
 
-        {detail &&
-        detail.current_status === "PACKING" &&
-        detail.active_pack_session ? (
-          <CombinedPackSessionBanner
-            session={detail.active_pack_session}
-            currentDnId={detail.id}
-          />
-        ) : null}
-        {detail &&
-        (detail.current_status === "PACKED" ||
-          detail.current_status === "SHIPPING_IN_PROGRESS") &&
-        detail.completed_pack_sessions?.[0] ? (
-          <CompletedPackResultBanner
-            session={detail.completed_pack_sessions[0]}
-            currentDnId={detail.id}
-            totalSessionCount={detail.completed_pack_sessions.length}
-            editable={
-              detail.current_status === "PACKED" && canEditPackResult()
-            }
-            onEdit={
-              canEditPackResult() && detail.current_status === "PACKED"
-                ? openEditPackResultModal
-                : undefined
-            }
-            readOnly={detail.current_status === "SHIPPING_IN_PROGRESS"}
-            rateEstimator={
-              detail.current_status === "SHIPPING_IN_PROGRESS" ? (
-                <RateQuoteEstimator
-                  deliveryNoteId={detail.id}
-                  selected={shipRateQuote}
-                  onSelect={setShipRateQuote}
-                  primaryButton
-                />
-              ) : undefined
-            }
-          />
-        ) : null}
-
         {!detail && !error ? (
           <p className="text-center text-sm text-slate-500">Loading…</p>
         ) : null}
 
         {detail ? (
           <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
-            <div className="min-w-0 space-y-4">
-              <DnCustomerCard detail={detail} />
-              <DnShipToCard detail={detail} />
+            <div className="min-w-0 space-y-3">
+              <DnShipmentInfoCard detail={detail} />
               <DnLinesCard detail={detail} />
+              {detail.current_status === "PACKING" &&
+              detail.active_pack_session ? (
+                <CombinedPackSessionBanner
+                  session={detail.active_pack_session}
+                  currentDnId={detail.id}
+                />
+              ) : null}
+              {(detail.current_status === "PACKED" ||
+                detail.current_status === "SHIPPING_IN_PROGRESS") &&
+              detail.completed_pack_sessions?.[0] ? (
+                <CompletedPackResultBanner
+                  session={detail.completed_pack_sessions[0]}
+                  currentDnId={detail.id}
+                  totalSessionCount={detail.completed_pack_sessions.length}
+                  editable={
+                    detail.current_status === "PACKED" && canEditPackResult()
+                  }
+                  onEdit={
+                    canEditPackResult() && detail.current_status === "PACKED"
+                      ? openEditPackResultModal
+                      : undefined
+                  }
+                  readOnly={detail.current_status === "SHIPPING_IN_PROGRESS"}
+                  rateEstimator={
+                    detail.current_status === "SHIPPING_IN_PROGRESS" ? (
+                      <RateQuoteEstimator
+                        deliveryNoteId={detail.id}
+                        selected={shipRateQuote}
+                        onSelect={setShipRateQuote}
+                        primaryButton
+                      />
+                    ) : undefined
+                  }
+                />
+              ) : null}
             </div>
             <div className="min-w-0 xl:sticky xl:top-4">
               <DnWorkflowRail
