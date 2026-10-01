@@ -541,10 +541,16 @@ function RecordedBoxesCard({
   rateEstimator?: ReactNode;
 }) {
   const weight = sumBoxWeight(boxes);
-  const sizeDisplays: string[] = [];
+  // Group identical box sizes with a count: "15×15×12 (2)" instead of
+  // "15×15×12, 15×15×12". Display-only; the copy button keeps the expanded list.
+  const sizeCounts = new Map<string, number>();
   for (const b of boxes) {
     const s = formatBoxSizeDisplay(b);
-    if (s) sizeDisplays.push(s);
+    if (s) sizeCounts.set(s, (sizeCounts.get(s) ?? 0) + 1);
+  }
+  const sizeGroups: Array<{ display: string; count: number }> = [];
+  for (const [display, count] of sizeCounts) {
+    sizeGroups.push({ display, count });
   }
   const boxSizesCopyText = buildBoxSizesCopyText(boxes);
   return (
@@ -555,19 +561,44 @@ function RecordedBoxesCard({
             Recorded boxes
           </h3>
           <p className="mt-0.5 text-xs tabular-nums text-slate-500 dark:text-slate-400">
-            {boxes.length} box{boxes.length === 1 ? "" : "es"}
-            {weight ? ` · ${weight.lb} lb (${weight.kg} kg) total` : ""}
+            <span className="font-semibold text-slate-800 dark:text-slate-200">
+              {boxes.length} box{boxes.length === 1 ? "" : "es"}
+            </span>
+            {weight ? (
+              <>
+                {" · "}
+                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                  {weight.lb} lb ({weight.kg} kg)
+                </span>{" "}
+                total
+              </>
+            ) : null}
           </p>
         </div>
         {rateEstimator ? (
           <div className="flex shrink-0 items-center">{rateEstimator}</div>
         ) : null}
       </div>
-      {sizeDisplays.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-100 px-4 py-2 text-xs text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
-          <span className="tabular-nums">
-            Sizes (in): {sizeDisplays.join(", ")}
+      {sizeGroups.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-slate-100 px-4 py-2.5 dark:border-slate-800/80">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            Sizes (in)
           </span>
+          <ul className="flex list-none flex-wrap items-center gap-1.5 p-0" role="list">
+            {sizeGroups.map(({ display, count }) => (
+              <li
+                key={display}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs tabular-nums text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              >
+                <span className="font-semibold">{display}</span>
+                {count > 1 ? (
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                    ({count})
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
           <CopyTextButton value={boxSizesCopyText} label="box sizes" />
         </div>
       ) : null}
