@@ -1087,8 +1087,8 @@ export function OperationsShell({
           <div
             className={
               compact
-                ? "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col px-4 pb-6 pt-2 sm:px-6 sm:pt-3"
-                : "mx-auto w-full max-w-7xl flex-1 px-4 pb-12 pt-5 sm:px-6 sm:pt-6"
+                ? "mx-auto flex min-h-0 w-full max-w-[110rem] flex-1 flex-col px-4 pb-6 pt-2 sm:px-6 sm:pt-3"
+                : "mx-auto w-full max-w-[110rem] flex-1 px-4 pb-12 pt-5 sm:px-6 sm:pt-6"
             }
           >
             {children}
