@@ -1643,6 +1643,12 @@ export default function DeliveryNoteDetailPage() {
 
   function openStartPackingDialog() {
     if (!detail || detail.current_status !== "PICKED") return;
+    const peers = detail.packing_combine_peers?.items ?? [];
+    if (peers.length === 0) {
+      // Nothing to combine with — go straight to PACKING without the modal.
+      void submitStartPackingSession();
+      return;
+    }
     setModalPeersSelected(new Set());
     setStartPackingSaveError(null);
     setStartPackingDialogOpen(true);
