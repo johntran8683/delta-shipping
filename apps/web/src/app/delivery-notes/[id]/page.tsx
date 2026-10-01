@@ -2110,7 +2110,7 @@ export default function DeliveryNoteDetailPage() {
                       {formatDeliveryNoteNumber(detail.dn_number)}
                     </span>
                     {" — "}
-                    moves to PACKING with any notes you select below. Only
+                    moves to PACKING with the notes you select below. Only
                     PICKED notes in the same pack cluster can join.
                   </p>
                 </div>
@@ -2206,12 +2206,10 @@ export default function DeliveryNoteDetailPage() {
                       <p className="font-semibold text-amber-950 dark:text-amber-50">
                         No other notes can join right now.
                       </p>
-                      <p className="mt-2 text-amber-950/90 dark:text-amber-100/90">
+                      <p className="mt-1.5 text-amber-950/90 dark:text-amber-100/90">
                         The rest of this cluster is already packing or packed, or
-                        combining is turned off for this customer.
-                      </p>
-                      <p className="mt-2 font-medium text-amber-950 dark:text-amber-50">
-                        You will start packing this delivery note on its own.
+                        combining is off for this customer — you&apos;ll pack this
+                        delivery note on its own.
                       </p>
                     </div>
                   )}
