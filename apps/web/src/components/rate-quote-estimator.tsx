@@ -65,10 +65,13 @@ export function RateQuoteEstimator({
   deliveryNoteId,
   selected,
   onSelect,
+  primaryButton,
 }: {
   deliveryNoteId: string;
   selected: RateQuoteSelection | null;
   onSelect: (quote: RateQuoteSelection | null) => void;
+  /** Render the "Estimate fee" trigger as the primary action. */
+  primaryButton?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -179,7 +182,7 @@ export function RateQuoteEstimator({
         <button
           type="button"
           onClick={openModal}
-          className={`${btnBase} ${btnSecondary}`}
+          className={`${btnBase} ${primaryButton ? btnPrimary : btnSecondary}`}
         >
           Estimate fee
         </button>

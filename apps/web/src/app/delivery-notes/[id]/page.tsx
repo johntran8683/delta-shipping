@@ -533,7 +533,7 @@ function CopyTextButton({
   );
 }
 
-function PackageSummaryLine({
+function RecordedBoxesCard({
   boxes,
   rateEstimator,
 }: {
@@ -548,20 +548,65 @@ function PackageSummaryLine({
   }
   const boxSizesCopyText = buildBoxSizesCopyText(boxes);
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-        {boxes.length} box{boxes.length === 1 ? "" : "es"}
-        {weight ? ` · ${weight.lb} lb (${weight.kg} kg) total` : ""}
-      </p>
+    <div className="overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-700/70 dark:bg-slate-950/40">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800/80">
+        <div className="min-w-0">
+          <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
+            Recorded boxes
+          </h3>
+          <p className="mt-0.5 text-xs tabular-nums text-slate-500 dark:text-slate-400">
+            {boxes.length} box{boxes.length === 1 ? "" : "es"}
+            {weight ? ` · ${weight.lb} lb (${weight.kg} kg) total` : ""}
+          </p>
+        </div>
+        {rateEstimator ? (
+          <div className="flex shrink-0 items-center">{rateEstimator}</div>
+        ) : null}
+      </div>
       {sizeDisplays.length > 0 ? (
-        <span className="inline-flex flex-wrap items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-          <span>Sizes (in): {sizeDisplays.join(", ")}</span>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-100 px-4 py-2 text-xs text-slate-500 dark:border-slate-800/80 dark:text-slate-400">
+          <span className="tabular-nums">
+            Sizes (in): {sizeDisplays.join(", ")}
+          </span>
           <CopyTextButton value={boxSizesCopyText} label="box sizes" />
-        </span>
+        </div>
       ) : null}
-      {rateEstimator ? (
-        <span className="inline-flex items-center">{rateEstimator}</span>
-      ) : null}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[320px] border-collapse text-left">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
+              <th className="px-4 py-2">Box</th>
+              <th className="px-3 py-2">Weight</th>
+              <th className="px-4 py-2">L × W × H (in)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {boxes.map((b) => {
+              const bn = b.box_number?.trim();
+              const label = bn ? bn : `Box ${b.sort_order + 1}`;
+              return (
+                <tr
+                  key={b.id}
+                  className="border-b border-slate-50 transition last:border-b-0 hover:bg-slate-50/80 dark:border-slate-800/60 dark:hover:bg-slate-900/60"
+                >
+                  <td className="px-4 py-2 font-mono text-sm font-semibold tabular-nums tracking-tight text-slate-900 dark:text-slate-50">
+                    {label}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-sm tabular-nums text-slate-700 dark:text-slate-200">
+                    <span className="font-semibold">{b.weight_lb}</span>
+                    <span className="ml-1 text-xs font-medium text-slate-400 dark:text-slate-500">
+                      lb
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 font-mono text-sm font-medium tabular-nums text-slate-700 dark:text-slate-200">
+                    {b.length_in} × {b.width_in} × {b.height_in}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -715,46 +760,7 @@ function CompletedPackResultBanner({
 
       {boxes.length > 0 ? (
         <div className="mt-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Recorded boxes
-          </p>
-          <PackageSummaryLine boxes={boxes} rateEstimator={rateEstimator} />
-          <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200/80 bg-white/70 dark:border-slate-700/80 dark:bg-slate-950/50">
-            <table className="w-full min-w-[320px] border-collapse text-left">
-              <thead>
-                <tr className="border-b border-slate-200/90 bg-slate-100/90 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
-                  <th className="px-3 py-2.5 pl-4">Box</th>
-                  <th className="px-3 py-2.5">Weight</th>
-                  <th className="px-3 py-2.5 pr-4">L × W × H (in)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {boxes.map((b) => {
-                  const bn = b.box_number?.trim();
-                  const label = bn ? bn : `Box ${b.sort_order + 1}`;
-                  return (
-                    <tr
-                      key={b.id}
-                      className="border-b border-slate-100 last:border-b-0 dark:border-slate-800/90"
-                    >
-                      <td className="px-3 py-2.5 pl-4 font-mono text-base font-semibold tabular-nums tracking-tight text-slate-900 dark:text-slate-50">
-                        {label}
-                      </td>
-                      <td className="px-3 py-2.5 font-mono text-base tabular-nums text-slate-800 dark:text-slate-100">
-                        <span className="font-semibold">{b.weight_lb}</span>
-                        <span className="ml-1 text-sm font-medium text-slate-500 dark:text-slate-400">
-                          lb
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 pr-4 font-mono text-base font-semibold tabular-nums tracking-tight text-slate-800 dark:text-slate-100">
-                        {b.length_in} × {b.width_in} × {b.height_in}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <RecordedBoxesCard boxes={boxes} rateEstimator={rateEstimator} />
         </div>
       ) : null}
     </section>
@@ -1993,6 +1999,7 @@ export default function DeliveryNoteDetailPage() {
                   deliveryNoteId={detail.id}
                   selected={shipRateQuote}
                   onSelect={setShipRateQuote}
+                  primaryButton
                 />
               ) : undefined
             }
