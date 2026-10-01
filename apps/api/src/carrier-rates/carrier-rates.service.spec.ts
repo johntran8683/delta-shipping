@@ -55,15 +55,7 @@ describe('CarrierRatesService', () => {
     activeRoleId: 'role-1',
   };
 
-  function mockFetchSequence(responses: Response[]) {
-    global.fetch = jest.fn(async () => {
-      const next = responses.shift();
-      if (!next) throw new Error('unexpected fetch call');
-      return next;
-    }) as unknown as typeof fetch;
-  }
-
-  it('returns quotes from both carriers sorted by price', async () => {
+  it("quotes only the note's ship-method carrier (FedEx)", async () => {
     const { service, prisma, permissions } = buildService();
     permissions.roleHasPermission.mockResolvedValue(true);
     prisma.deliveryNote.findUnique.mockResolvedValue({
@@ -71,6 +63,7 @@ describe('CarrierRatesService', () => {
       dn_number: 'DN-1',
       current_status: 'SHIPPING_IN_PROGRESS',
       shipping_group_id: null,
+      shipping_type: 'FedEx Ground',
       ship_to_location: {
         postal_code: '10001',
         country_code: 'US',
@@ -88,28 +81,12 @@ describe('CarrierRatesService', () => {
         return null;
       },
     );
-    const fedexRow = {
+    prisma.carrierRateConfig.findUnique.mockResolvedValue({
       client_id: 'fcid',
       client_secret_enc: encryptSecret('fsecret'),
       account_number: '999',
       is_enabled: true,
-    };
-    const upsRow = {
-      client_id: 'ucid',
-      client_secret_enc: encryptSecret('usecret'),
-      account_number: null,
-      is_enabled: true,
-    };
-    prisma.carrierRateConfig.findUnique.mockImplementation(
-      async ({
-        where,
-      }: {
-        where: { carrier_code_environment: { carrier_code: string } };
-      }) =>
-        where.carrier_code_environment.carrier_code === 'FEDEX'
-          ? fedexRow
-          : upsRow,
-    );
+    });
     prisma.packSessionDeliveryNote.findMany.mockResolvedValue([
       { pack_session_id: 'ps-1' },
     ]);
@@ -117,9 +94,13 @@ describe('CarrierRatesService', () => {
       { weight_lb: '10.5', length_in: '24', width_in: '18', height_in: '12' },
       { weight_lb: '5', length_in: '12', width_in: '12', height_in: '12' },
     ]);
-    mockFetchSequence([
-      jsonResponse({ access_token: 'ftok', expires_in: 3600 }),
-      jsonResponse({
+    const fetchCalls: string[] = [];
+    global.fetch = jest.fn(async (url: unknown) => {
+      fetchCalls.push(String(url));
+      if (String(url).includes('/oauth/token')) {
+        return jsonResponse({ access_token: 'ftok', expires_in: 3600 });
+      }
+      return jsonResponse({
         output: {
           rateReplyDetails: [
             {
@@ -129,33 +110,32 @@ describe('CarrierRatesService', () => {
                 { totalNetCharge: 42.17, currency: 'USD' },
               ],
             },
+            {
+              serviceType: 'FEDEX_2_DAY',
+              serviceName: 'FedEx 2Day',
+              ratedShipmentDetails: [{ totalNetCharge: 88.5, currency: 'USD' }],
+            },
           ],
         },
-      }),
-      jsonResponse({ access_token: 'utok', expires_in: '14399' }),
-      jsonResponse({
-        RateResponse: {
-          RatedShipment: {
-            Service: { Code: '03', Description: 'UPS Ground' },
-            TotalCharges: { MonetaryValue: '30.00', CurrencyCode: 'USD' },
-          },
-        },
-      }),
-    ]);
+      });
+    }) as unknown as typeof fetch;
 
     const result = await service.getQuotesForDeliveryNote('dn-1', payload);
 
+    // Only FedEx was called — no UPS token/rate calls.
+    expect(fetchCalls).toHaveLength(2);
+    expect(fetchCalls.every((u) => u.includes('fedex.com'))).toBe(true);
     expect(result.packageCount).toBe(2);
     expect(result.deliveryNoteCount).toBe(1);
     expect(result.notices).toEqual([]);
     expect(result.quotes).toHaveLength(2);
-    // Sorted by price: UPS 30.00 before FedEx 42.17.
-    expect(result.quotes[0].carrierCode).toBe('UPS');
-    expect(result.quotes[0].totalCharge).toBe(30);
-    expect(result.quotes[1].carrierCode).toBe('FEDEX');
+    // Sorted by price: Ground 42.17 before 2Day 88.50.
+    expect(result.quotes[0].carrierCode).toBe('FEDEX');
+    expect(result.quotes[0].totalCharge).toBe(42.17);
+    expect(result.quotes[1].totalCharge).toBe(88.5);
   });
 
-  it('adds a notice when a carrier fails but still returns the other quotes', async () => {
+  it('quotes only UPS when the ship method is UPS', async () => {
     const { service, prisma, permissions } = buildService();
     permissions.roleHasPermission.mockResolvedValue(true);
     prisma.deliveryNote.findUnique.mockResolvedValue({
@@ -163,6 +143,7 @@ describe('CarrierRatesService', () => {
       dn_number: 'DN-1',
       current_status: 'SHIPPING_IN_PROGRESS',
       shipping_group_id: null,
+      shipping_type: 'UPS',
       ship_to_location: { postal_code: '10001', country_code: 'US' },
     });
     prisma.appSetting.findUnique.mockImplementation(
@@ -176,44 +157,181 @@ describe('CarrierRatesService', () => {
             }
           : null,
     );
-    prisma.carrierRateConfig.findUnique.mockImplementation(
-      async ({
-        where: _where,
-      }: {
-        where: { carrier_code_environment: { carrier_code: string } };
-      }) => ({
-        client_id: 'cid',
-        client_secret_enc: encryptSecret('secret'),
-        account_number: null,
-        is_enabled: true,
-      }),
-    );
+    prisma.carrierRateConfig.findUnique.mockResolvedValue({
+      client_id: 'ucid',
+      client_secret_enc: encryptSecret('usecret'),
+      account_number: null,
+      is_enabled: true,
+    });
     prisma.packSessionDeliveryNote.findMany.mockResolvedValue([
       { pack_session_id: 'ps-1' },
     ]);
     prisma.packBox.findMany.mockResolvedValue([
       { weight_lb: '10', length_in: '24', width_in: '18', height_in: '12' },
     ]);
-    mockFetchSequence([
-      jsonResponse({ access_token: 'ftok', expires_in: 3600 }),
-      jsonResponse({ errors: [{ message: 'Boom' }] }),
-      jsonResponse({ access_token: 'utok', expires_in: 3600 }),
-      jsonResponse({
+    const fetchCalls: string[] = [];
+    global.fetch = jest.fn(async (url: unknown) => {
+      fetchCalls.push(String(url));
+      if (String(url).includes('/oauth/token')) {
+        return jsonResponse({ access_token: 'utok', expires_in: 3600 });
+      }
+      return jsonResponse({
         RateResponse: {
           RatedShipment: {
-            Service: { Code: '03' },
+            Service: { Code: '03', Description: 'UPS Ground' },
             TotalCharges: { MonetaryValue: '30.00', CurrencyCode: 'USD' },
           },
         },
-      }),
-    ]);
+      });
+    }) as unknown as typeof fetch;
 
     const result = await service.getQuotesForDeliveryNote('dn-1', payload);
 
+    expect(fetchCalls).toHaveLength(2);
+    expect(fetchCalls.every((u) => u.includes('ups.com'))).toBe(true);
     expect(result.quotes).toHaveLength(1);
     expect(result.quotes[0].carrierCode).toBe('UPS');
-    expect(result.notices).toHaveLength(1);
-    expect(result.notices[0]).toMatch(/FedEx/);
+    expect(result.quotes[0].totalCharge).toBe(30);
+  });
+
+  it('routes DHL ship methods to the DHL provider', async () => {
+    const { service, prisma, permissions } = buildService();
+    permissions.roleHasPermission.mockResolvedValue(true);
+    prisma.deliveryNote.findUnique.mockResolvedValue({
+      id: 'dn-1',
+      dn_number: 'DN-1',
+      current_status: 'SHIPPING_IN_PROGRESS',
+      shipping_group_id: null,
+      shipping_type: 'DHL Express',
+      ship_to_location: {
+        postal_code: '10001',
+        country_code: 'US',
+        city: 'New York',
+      },
+    });
+    prisma.appSetting.findUnique.mockImplementation(
+      async ({ where }: { where: { key: string } }) =>
+        where.key === 'rate_quote_origin'
+          ? {
+              value: JSON.stringify({
+                postalCode: 'V3S1A1',
+                countryCode: 'CA',
+                city: 'Surrey',
+              }),
+            }
+          : null,
+    );
+    prisma.carrierRateConfig.findUnique.mockResolvedValue({
+      client_id: 'dhl-user',
+      client_secret_enc: encryptSecret('dhl-pass'),
+      account_number: '123456789',
+      is_enabled: true,
+    });
+    prisma.packSessionDeliveryNote.findMany.mockResolvedValue([
+      { pack_session_id: 'ps-1' },
+    ]);
+    prisma.packBox.findMany.mockResolvedValue([
+      { weight_lb: '10', length_in: '24', width_in: '18', height_in: '12' },
+    ]);
+    const fetchCalls: Array<{ url: string; init: RequestInit }> = [];
+    global.fetch = jest.fn(async (url: unknown, init?: RequestInit) => {
+      fetchCalls.push({ url: String(url), init: init ?? {} });
+      return jsonResponse({
+        products: [
+          {
+            productName: 'EXPRESS WORLDWIDE',
+            productCode: 'P',
+            totalPrice: [
+              { currencyType: 'BILLC', priceCurrency: 'USD', price: 120.5 },
+            ],
+          },
+        ],
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await service.getQuotesForDeliveryNote('dn-1', payload);
+
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0].url).toBe(
+      'https://express.api.dhl.com/mydhlapi/test/rates',
+    );
+    const headers = fetchCalls[0].init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe(
+      `Basic ${Buffer.from('dhl-user:dhl-pass').toString('base64')}`,
+    );
+    expect(result.quotes).toHaveLength(1);
+    expect(result.quotes[0]).toMatchObject({
+      carrierCode: 'DHL',
+      serviceCode: 'P',
+      totalCharge: 120.5,
+      currency: 'USD',
+    });
+  });
+
+  it('blocks a note with no ship method', async () => {
+    const { service, prisma, permissions } = buildService();
+    permissions.roleHasPermission.mockResolvedValue(true);
+    prisma.deliveryNote.findUnique.mockResolvedValue({
+      id: 'dn-1',
+      dn_number: 'DN-1',
+      current_status: 'SHIPPING_IN_PROGRESS',
+      shipping_group_id: null,
+      shipping_type: null,
+      ship_to_location: { postal_code: '10001', country_code: 'US' },
+    });
+    await expect(
+      service.getQuotesForDeliveryNote('dn-1', payload),
+    ).rejects.toThrow(/no ship method/);
+  });
+
+  it('blocks a note with an unsupported ship method', async () => {
+    const { service, prisma, permissions } = buildService();
+    permissions.roleHasPermission.mockResolvedValue(true);
+    prisma.deliveryNote.findUnique.mockResolvedValue({
+      id: 'dn-1',
+      dn_number: 'DN-1',
+      current_status: 'SHIPPING_IN_PROGRESS',
+      shipping_group_id: null,
+      shipping_type: 'USPS',
+      ship_to_location: { postal_code: '10001', country_code: 'US' },
+    });
+    await expect(
+      service.getQuotesForDeliveryNote('dn-1', payload),
+    ).rejects.toThrow(/only available for FedEx, UPS, and DHL/);
+  });
+
+  it('fails clearly when the ship-method carrier is not configured', async () => {
+    const { service, prisma, permissions } = buildService();
+    permissions.roleHasPermission.mockResolvedValue(true);
+    prisma.deliveryNote.findUnique.mockResolvedValue({
+      id: 'dn-1',
+      dn_number: 'DN-1',
+      current_status: 'SHIPPING_IN_PROGRESS',
+      shipping_group_id: null,
+      shipping_type: 'FedEx',
+      ship_to_location: { postal_code: '10001', country_code: 'US' },
+    });
+    prisma.appSetting.findUnique.mockImplementation(
+      async ({ where }: { where: { key: string } }) =>
+        where.key === 'rate_quote_origin'
+          ? {
+              value: JSON.stringify({
+                postalCode: 'V3S1A1',
+                countryCode: 'CA',
+              }),
+            }
+          : null,
+    );
+    prisma.carrierRateConfig.findUnique.mockResolvedValue(null);
+    prisma.packSessionDeliveryNote.findMany.mockResolvedValue([
+      { pack_session_id: 'ps-1' },
+    ]);
+    prisma.packBox.findMany.mockResolvedValue([
+      { weight_lb: '10', length_in: '24', width_in: '18', height_in: '12' },
+    ]);
+    await expect(
+      service.getQuotesForDeliveryNote('dn-1', payload),
+    ).rejects.toThrow(/not configured/);
   });
 
   it('rejects quotes when the note is not in SHIPPING_IN_PROGRESS', async () => {

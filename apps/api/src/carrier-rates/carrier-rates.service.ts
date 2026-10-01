@@ -10,13 +10,14 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type { JwtPayload } from '../auth/jwt-payload';
+import { inferCarrierCodeFromShippingType } from '../delivery-notes/carrier-match';
 import { PermissionsService } from '../auth/permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptSecret, encryptSecret } from './crypto';
+import { DhlRateProvider } from './dhl-rate.provider';
 import { FedExRateProvider } from './fedex-rate.provider';
 import { UpsRateProvider } from './ups-rate.provider';
 import type {
@@ -81,6 +82,7 @@ export class CarrierRateProviderRegistry {
   private readonly providers: CarrierRateProvider[] = [
     new FedExRateProvider(),
     new UpsRateProvider(),
+    new DhlRateProvider(),
   ];
 
   get(code: CarrierCode): CarrierRateProvider {
@@ -96,7 +98,6 @@ export class CarrierRateProviderRegistry {
 
 @Injectable()
 export class CarrierRatesService {
-  private readonly logger = new Logger(CarrierRatesService.name);
   private readonly registry = new CarrierRateProviderRegistry();
 
   constructor(
@@ -150,6 +151,7 @@ export class CarrierRatesService {
     const fallback: Record<CarrierCode, CarrierEnvironment> = {
       FEDEX: 'SANDBOX',
       UPS: 'SANDBOX',
+      DHL: 'SANDBOX',
     };
     if (!row) return fallback;
     try {
@@ -159,6 +161,7 @@ export class CarrierRatesService {
       return {
         FEDEX: parsed.FEDEX === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
         UPS: parsed.UPS === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
+        DHL: parsed.DHL === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
       };
     } catch {
       return fallback;
@@ -206,6 +209,7 @@ export class CarrierRatesService {
         dn_number: true,
         current_status: true,
         shipping_group_id: true,
+        shipping_type: true,
         ship_to_location: {
           select: {
             postal_code: true,
@@ -222,6 +226,21 @@ export class CarrierRatesService {
         `Rate quotes are only available while shipping is in progress (this note is ${dn.current_status}).`,
       );
     }
+
+    // The quote always comes from the carrier on the note's ship method —
+    // quoting a different carrier's API would price the wrong service.
+    // (Grouped notes share one ship method; the clicked note's decides.)
+    // Checked before origin/address so a bad ship method is reported first.
+    const shipMethod = (dn.shipping_type ?? '').trim();
+    const inferred = inferCarrierCodeFromShippingType(shipMethod);
+    if (inferred !== 'FEDEX' && inferred !== 'UPS' && inferred !== 'DHL') {
+      throw new BadRequestException(
+        shipMethod
+          ? `Live estimates are only available for FedEx, UPS, and DHL shipments — this note's ship method is "${shipMethod}".`
+          : 'This delivery note has no ship method set, so no carrier can be quoted. Set the ship method to FedEx, UPS, or DHL first.',
+      );
+    }
+    const provider = this.registry.get(inferred);
 
     const origin = await this.readOrigin();
     if (!origin) {
@@ -284,41 +303,33 @@ export class CarrierRatesService {
     };
 
     const activeEnvs = await this.readActiveEnvironments();
-    const quotes: RateQuote[] = [];
+
+    const environment = activeEnvs[inferred];
+    let creds: CarrierRateCredentials | null = null;
+    try {
+      creds = await this.loadCredentials(inferred, environment);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+    if (!creds) {
+      throw new BadRequestException(
+        `${provider.displayName} is not configured for ${environment}. A supervisor can enable it in Settings → Carrier rates.`,
+      );
+    }
+
     const notices: string[] = [];
-    for (const provider of this.registry.all()) {
-      const environment = activeEnvs[provider.code];
-      let creds: CarrierRateCredentials | null = null;
-      try {
-        creds = await this.loadCredentials(provider.code, environment);
-      } catch (e) {
-        notices.push(
-          `${provider.displayName} (${environment}): ${(e as Error).message}`,
-        );
-        continue;
-      }
-      if (!creds) {
-        notices.push(
-          `${provider.displayName} is not configured for ${environment}; enable it in Settings → Carrier rates to include its quotes.`,
-        );
-        continue;
-      }
-      try {
-        const carrierQuotes = await provider.getQuotes(request, creds);
-        quotes.push(...carrierQuotes);
-        if (carrierQuotes.length === 0) {
-          notices.push(
-            `${provider.displayName} returned no quotes for this shipment.`,
-          );
-        }
-      } catch (e) {
-        this.logger.warn(
-          `${provider.displayName} quote failed: ${(e as Error).message}`,
-        );
-        notices.push(
-          `${provider.displayName} quote failed: ${(e as Error).message}`,
-        );
-      }
+    let quotes: RateQuote[];
+    try {
+      quotes = await provider.getQuotes(request, creds);
+    } catch (e) {
+      throw new BadRequestException(
+        `${provider.displayName} quote failed: ${(e as Error).message}`,
+      );
+    }
+    if (quotes.length === 0) {
+      notices.push(
+        `${provider.displayName} returned no quotes for this shipment.`,
+      );
     }
 
     quotes.sort((a, b) => a.totalCharge - b.totalCharge);
@@ -378,7 +389,7 @@ export class CarrierRatesService {
     );
 
     const view = {} as CarrierSettingsView['carriers'];
-    for (const code of ['FEDEX', 'UPS'] as CarrierCode[]) {
+    for (const code of ['FEDEX', 'UPS', 'DHL'] as CarrierCode[]) {
       const entry = {
         activeEnvironment: activeEnvs[code],
         sandbox: null as MaskedCredentials | null,
@@ -444,17 +455,19 @@ export class CarrierRatesService {
         value: JSON.stringify({
           FEDEX: dto.FEDEX.activeEnvironment,
           UPS: dto.UPS.activeEnvironment,
+          DHL: dto.DHL.activeEnvironment,
         }),
       },
       update: {
         value: JSON.stringify({
           FEDEX: dto.FEDEX.activeEnvironment,
           UPS: dto.UPS.activeEnvironment,
+          DHL: dto.DHL.activeEnvironment,
         }),
       },
     });
 
-    for (const code of ['FEDEX', 'UPS'] as CarrierCode[]) {
+    for (const code of ['FEDEX', 'UPS', 'DHL'] as CarrierCode[]) {
       const carrierDto = dto[code];
       for (const env of ['SANDBOX', 'PRODUCTION'] as CarrierEnvironment[]) {
         const envDto =

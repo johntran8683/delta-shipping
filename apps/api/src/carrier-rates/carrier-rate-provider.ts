@@ -1,11 +1,11 @@
 /**
  * Shared types for the carrier rate-quote integration.
  *
- * A provider talks to one carrier's rating API (FedEx / UPS) and returns
- * normalized quotes. Secrets never leave the API server.
+ * A provider talks to one carrier's rating API (FedEx / UPS / DHL Express)
+ * and returns normalized quotes. Secrets never leave the API server.
  */
 
-export type CarrierCode = 'FEDEX' | 'UPS';
+export type CarrierCode = 'FEDEX' | 'UPS' | 'DHL';
 export type CarrierEnvironment = 'SANDBOX' | 'PRODUCTION';
 
 export interface QuoteAddress {

@@ -19,7 +19,7 @@ export class GetRateQuotesDto {
 
 /** Test carrier credentials — stored ones, or draft values from the form. */
 export class TestCarrierConnectionDto {
-  @IsIn(['FEDEX', 'UPS'])
+  @IsIn(['FEDEX', 'UPS', 'DHL'])
   carrierCode!: CarrierCode;
 
   @IsIn(['SANDBOX', 'PRODUCTION'])
@@ -115,4 +115,8 @@ export class SaveCarrierRateSettingsDto {
   @ValidateNested()
   @Type(() => CarrierSettingsDto)
   UPS!: CarrierSettingsDto;
+
+  @ValidateNested()
+  @Type(() => CarrierSettingsDto)
+  DHL!: CarrierSettingsDto;
 }

@@ -207,7 +207,7 @@ export function RateQuoteEstimator({
                     Shipping rate estimates
                   </h2>
                   <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                    Live rates from FedEx and UPS, sorted by price. Pick one to
+                    Live rates from this note&apos;s carrier, sorted by price. Pick one to
                     attach it to this shipment when you mark it shipped.
                   </p>
                 </div>

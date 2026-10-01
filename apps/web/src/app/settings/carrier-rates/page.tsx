@@ -9,7 +9,7 @@ import { clearSession, getAccessToken, getActiveRoleCode } from "@/lib/auth-stor
 import { formatApiErrorPayload } from "@/lib/api-error";
 import { apiBase } from "@/lib/config";
 
-type CarrierCode = "FEDEX" | "UPS";
+type CarrierCode = "FEDEX" | "UPS" | "DHL";
 type CarrierEnvironment = "SANDBOX" | "PRODUCTION";
 
 type MaskedEnv = {
@@ -63,6 +63,7 @@ type OriginForm = {
 const CARRIERS: Array<{ code: CarrierCode; name: string; docs: string }> = [
   { code: "FEDEX", name: "FedEx", docs: "developer.fedex.com → My Projects → create API project → select Rating" },
   { code: "UPS", name: "UPS", docs: "developer.ups.com → My Apps → create app → add the Rating product" },
+  { code: "DHL", name: "DHL Express", docs: "developer.dhl.com → API catalog → DHL Express - MyDHL API → create an app" },
 ];
 
 const inputClass =
@@ -118,6 +119,7 @@ export default function CarrierRatesSettingsPage() {
   const [forms, setForms] = useState<Record<CarrierCode, CarrierForm>>({
     FEDEX: { activeEnvironment: "SANDBOX", sandbox: emptyEnv(), production: emptyEnv() },
     UPS: { activeEnvironment: "SANDBOX", sandbox: emptyEnv(), production: emptyEnv() },
+    DHL: { activeEnvironment: "SANDBOX", sandbox: emptyEnv(), production: emptyEnv() },
   });
 
   const load = useCallback(async () => {
@@ -158,6 +160,7 @@ export default function CarrierRatesSettingsPage() {
       const next: Record<CarrierCode, CarrierForm> = {
         FEDEX: { activeEnvironment: "SANDBOX", sandbox: emptyEnv(), production: emptyEnv() },
         UPS: { activeEnvironment: "SANDBOX", sandbox: emptyEnv(), production: emptyEnv() },
+        DHL: { activeEnvironment: "SANDBOX", sandbox: emptyEnv(), production: emptyEnv() },
       };
       for (const c of CARRIERS) {
         const view = body.carriers?.[c.code];
@@ -232,36 +235,25 @@ export default function CarrierRatesSettingsPage() {
             postalCode: origin.postalCode,
             countryCode: origin.countryCode,
           },
-          FEDEX: {
-            activeEnvironment: forms.FEDEX.activeEnvironment,
-            sandbox: {
-              clientId: forms.FEDEX.sandbox.clientId,
-              clientSecret: forms.FEDEX.sandbox.clientSecret,
-              accountNumber: forms.FEDEX.sandbox.accountNumber,
-              isEnabled: forms.FEDEX.sandbox.isEnabled,
-            },
-            production: {
-              clientId: forms.FEDEX.production.clientId,
-              clientSecret: forms.FEDEX.production.clientSecret,
-              accountNumber: forms.FEDEX.production.accountNumber,
-              isEnabled: forms.FEDEX.production.isEnabled,
-            },
-          },
-          UPS: {
-            activeEnvironment: forms.UPS.activeEnvironment,
-            sandbox: {
-              clientId: forms.UPS.sandbox.clientId,
-              clientSecret: forms.UPS.sandbox.clientSecret,
-              accountNumber: forms.UPS.sandbox.accountNumber,
-              isEnabled: forms.UPS.sandbox.isEnabled,
-            },
-            production: {
-              clientId: forms.UPS.production.clientId,
-              clientSecret: forms.UPS.production.clientSecret,
-              accountNumber: forms.UPS.production.accountNumber,
-              isEnabled: forms.UPS.production.isEnabled,
-            },
-          },
+          ...Object.fromEntries(
+            CARRIERS.map((c) => {
+              const f = forms[c.code];
+              const pick = (e: typeof f.sandbox) => ({
+                clientId: e.clientId,
+                clientSecret: e.clientSecret,
+                accountNumber: e.accountNumber,
+                isEnabled: e.isEnabled,
+              });
+              return [
+                c.code,
+                {
+                  activeEnvironment: f.activeEnvironment,
+                  sandbox: pick(f.sandbox),
+                  production: pick(f.production),
+                },
+              ];
+            }),
+          ),
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -333,6 +325,15 @@ export default function CarrierRatesSettingsPage() {
   function renderEnvFields(carrier: CarrierCode, env: CarrierEnvironment) {
     const form = forms[carrier][env === "SANDBOX" ? "sandbox" : "production"];
     const testKey = `${carrier}:${env}`;
+    const isDhl = carrier === "DHL";
+    const idLabel = isDhl ? "API username" : "Client ID";
+    const secretLabel = isDhl ? "API password" : "Client secret";
+    const accountPlaceholder =
+      carrier === "UPS"
+        ? "6-digit shipper number"
+        : carrier === "DHL"
+          ? "DHL Express account number"
+          : "FedEx account number";
     return (
       <div className="space-y-3 rounded-lg border border-slate-200/80 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-900/40">
         <div className="flex items-center justify-between">
@@ -351,7 +352,7 @@ export default function CarrierRatesSettingsPage() {
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className={labelClass}>Client ID</label>
+            <label className={labelClass}>{idLabel}</label>
             <input
               className={inputClass}
               value={form.clientId}
@@ -366,12 +367,12 @@ export default function CarrierRatesSettingsPage() {
               value={form.accountNumber}
               onChange={(e) => setCarrierField(carrier, env, "accountNumber", e.target.value)}
               autoComplete="off"
-              placeholder={carrier === "UPS" ? "6-digit shipper number" : "FedEx account number"}
+              placeholder={accountPlaceholder}
             />
           </div>
         </div>
         <div>
-          <label className={labelClass}>Client secret</label>
+          <label className={labelClass}>{secretLabel}</label>
           <input
             type="password"
             className={inputClass}
@@ -401,7 +402,7 @@ export default function CarrierRatesSettingsPage() {
   return (
     <OperationsShell
       title="Carrier rates"
-      subtitle="Warehouse origin address and FedEx / UPS API credentials for live transportation-fee estimates. Supervisor or system role only."
+      subtitle="Warehouse origin address and FedEx / UPS / DHL Express API credentials for live transportation-fee estimates. Supervisor or system role only."
     >
       <div className="mx-auto max-w-3xl space-y-6">
         <nav
