@@ -829,12 +829,12 @@ function getPackRevertDialogModelFromStatuses(
       toStatus,
       title: "Return this pack session to picked?",
       bullets: [
-        "Every delivery note in this session goes back to PICKED.",
+        "All delivery notes in this session return to PICKED.",
         "The open pack session is removed.",
-        "You can start packing again later if needed.",
+        "You can start packing again anytime.",
       ],
       severity: "standard",
-      confirmLabel: "Return session to picked",
+      confirmLabel: "Return to picked",
     };
   }
   if (from === "PACKED" && to === "PACKING") {
@@ -842,8 +842,8 @@ function getPackRevertDialogModelFromStatuses(
       toStatus,
       title: "Reopen packing for this pack?",
       bullets: [
-        "All saved box dimensions for this completed pack are removed.",
-        "The pack session is marked incomplete again.",
+        "Saved box dimensions for this completed pack are removed.",
+        "The pack session becomes incomplete again.",
         "Every note in this pack returns to PACKING together.",
       ],
       severity: "caution",
@@ -856,11 +856,11 @@ function getPackRevertDialogModelFromStatuses(
       title: "Remove this completed pack?",
       bullets: [
         "The pack session is deleted — not just this screen.",
-        "All box records and dimensions for that session are lost.",
+        "All box records for this session are lost.",
         "Every delivery note in the pack returns to PICKED.",
       ],
       severity: "destructive",
-      confirmLabel: "Remove pack and go to picked",
+      confirmLabel: "Remove pack",
     };
   }
   if (from === "SHIPPING_IN_PROGRESS" && to === "PACKED") {
@@ -907,8 +907,8 @@ function getPackRevertDialogModel(
   const n = affectedNotes.length;
   const lead =
     n > 0
-      ? `This step applies to all ${n} delivery note${n === 1 ? "" : "s"} in the same pack session as ${formatDeliveryNoteNumber(detail.dn_number)}.`
-      : `This step applies to every delivery note in the same pack session as ${formatDeliveryNoteNumber(detail.dn_number)}.`;
+      ? `This applies to all ${n} delivery note${n === 1 ? "" : "s"} in the same session as ${formatDeliveryNoteNumber(detail.dn_number)}.`
+      : `This applies to every delivery note in the same session as ${formatDeliveryNoteNumber(detail.dn_number)}.`;
 
   return { ...base, affectedNotes, lead };
 }
@@ -2110,8 +2110,8 @@ export default function DeliveryNoteDetailPage() {
                       {formatDeliveryNoteNumber(detail.dn_number)}
                     </span>
                     {" — "}
-                    moves to PACKING together with any notes you select below
-                    (same pack cluster, all must be PICKED).
+                    moves to PACKING with any notes you select below. Only
+                    PICKED notes in the same pack cluster can join.
                   </p>
                 </div>
 
@@ -2124,8 +2124,8 @@ export default function DeliveryNoteDetailPage() {
                             Add to this pack session (optional)
                           </p>
                           <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                            Tick other PICKED delivery notes in the same cluster. Leave
-                            all unchecked to pack only this note.
+                            Select other PICKED notes in the same cluster.
+                            Leave all unchecked to pack this note alone.
                           </p>
                           <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-950/50">
                             {selectablePackPeers.map((p) => (
@@ -2165,8 +2165,8 @@ export default function DeliveryNoteDetailPage() {
                             Same cluster — not PICKED yet
                           </p>
                           <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                            These notes share the same pack cluster but cannot join
-                            until they are PICKED (or they are already packing).
+                            These notes share the pack cluster but are not
+                            PICKED yet, so they cannot join.
                           </p>
                           <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-200/80 bg-slate-50/80 p-2 dark:border-slate-700 dark:bg-slate-900/40">
                             {otherClusterPackPeers.map((p) => (
@@ -2195,23 +2195,20 @@ export default function DeliveryNoteDetailPage() {
                       {selectablePackPeers.length === 0 &&
                       otherClusterPackPeers.length > 0 ? (
                         <p className="rounded-lg border border-amber-200/80 bg-amber-50/80 px-3 py-2 text-xs text-amber-950 dark:border-amber-700/50 dark:bg-amber-950/25 dark:text-amber-100">
-                          There are no other PICKED notes to tick right now. Use{" "}
+                          There are no other PICKED notes right now. Use{" "}
                           <span className="font-semibold">Start packing</span> to
-                          begin with this note only, or pick the other orders first.
+                          begin with this note alone, or pick the others first.
                         </p>
                       ) : null}
                     </div>
                   ) : (
                     <div className="rounded-lg border border-amber-200/80 bg-amber-50/80 px-3 py-3 text-xs leading-relaxed text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/25 dark:text-amber-100">
                       <p className="font-semibold text-amber-950 dark:text-amber-50">
-                        All combinable delivery notes are already in PACKING (or
-                        otherwise not listed here).
+                        No other notes can join right now.
                       </p>
                       <p className="mt-2 text-amber-950/90 dark:text-amber-100/90">
-                        There are no other PICKED notes in this combine cluster
-                        right now. Other lines may already be packing or packed,
-                        combine hints may be turned off for this customer, or this
-                        may be the only eligible note.
+                        The rest of this cluster is already packing or packed, or
+                        combining is turned off for this customer.
                       </p>
                       <p className="mt-2 font-medium text-amber-950 dark:text-amber-50">
                         You will start packing this delivery note on its own.
@@ -2362,9 +2359,7 @@ export default function DeliveryNoteDetailPage() {
                     </div>
                   ) : (
                     <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-[11px] leading-relaxed text-slate-500 dark:border-slate-600 dark:text-slate-400">
-                      Member list will match the pack session on the server — often
-                      the same combine cluster as when you start packing (Next on the
-                      bar).
+                      Member list will load from the pack session on the server.
                     </p>
                   )}
 
@@ -2441,7 +2436,8 @@ export default function DeliveryNoteDetailPage() {
                     </span>
                     {packBoxesModalMode === "edit" ? (
                       <>
-                        {" — "}Update boxes and pack note for this completed session.
+                        {" — "}Update the boxes and pack note for this completed
+                        session.
                         {(detail.completed_pack_sessions?.[0]?.delivery_notes
                           ?.length ?? 0) > 1
                           ? " Applies to every delivery note in the combined pack."
@@ -2449,9 +2445,9 @@ export default function DeliveryNoteDetailPage() {
                       </>
                     ) : (
                       <>
-                        {" — "}Enter each box (weight in lb, dimensions L × W × H in
-                        inches). Everyone in this open pack session moves to PACKED
-                        together.
+                        {" — "}Record each box (weight in lb, dimensions L × W × H
+                        in inches). Every note in this pack session moves to
+                        PACKED together.
                       </>
                     )}
                   </p>
@@ -2665,7 +2661,7 @@ export default function DeliveryNoteDetailPage() {
                   </h2>
                   <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
                     Notes packed together are always included. You can also add
-                    other packed notes for the same customer, ship-to, and ship
+                    other packed notes with the same customer, ship-to, and ship
                     method.
                   </p>
                 </div>
@@ -2742,11 +2738,11 @@ export default function DeliveryNoteDetailPage() {
                           <p className="text-xs font-semibold text-amber-900 dark:text-amber-100">
                             {shipGroupOptions.notPacked.length} more note
                             {shipGroupOptions.notPacked.length === 1 ? "" : "s"}{" "}
-                            for this customer / ship-to / ship method{" "}
+                            for this customer, ship-to, and ship method{" "}
                             {shipGroupOptions.notPacked.length === 1
-                              ? "is"
-                              : "are"}{" "}
-                            not packed yet:
+                              ? "isn't"
+                              : "aren't"}{" "}
+                            packed yet:
                           </p>
                           <p className="mt-1 font-mono text-[11px] text-amber-800 dark:text-amber-200">
                             {shipGroupOptions.notPacked
@@ -2838,7 +2834,7 @@ export default function DeliveryNoteDetailPage() {
                     id={shipMarkDescId}
                     className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400"
                   >
-                    One tracking number applies to the whole shipment. Each
+                    One tracking number covers the whole shipment. Each
                     delivery note needs its own invoice number.
                   </p>
                 </div>
@@ -2935,13 +2931,13 @@ export default function DeliveryNoteDetailPage() {
                           )}
                         </span>
                         <span className="mt-0.5 block text-[11px] opacity-80">
-                          Saved on the shipment with this tracking number.
+                          Saved with this shipment.
                         </span>
                       </p>
                     ) : (
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        No estimate selected — you can pick one from Estimate
-                        fee next to the package summary before marking shipped.
+                        No estimate selected. Choose one with Estimate fee next
+                        to the package summary before marking shipped.
                       </p>
                     )}
                   </div>
