@@ -1157,7 +1157,7 @@ function DeliveryNotesContent() {
             onChange={(e) => setDnNumberFilter(e.target.value)}
             placeholder="DN #"
             title="Partial match on delivery note number"
-            className={`${fieldClass} w-28`}
+            className={`${fieldClass} w-56`}
           />
           <label htmlFor="filter-customer" className="sr-only">
             Customer
