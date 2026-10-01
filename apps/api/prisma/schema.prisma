@@ -50,9 +50,9 @@ model Role {
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
 
-  user_roles       UserRole[]
-  role_permissions RolePermission[]
-  dn_status_actor  DnStatusHistory[] @relation("StatusActorRole")
+  user_roles        UserRole[]
+  role_permissions  RolePermission[]
+  dn_status_actor   DnStatusHistory[]   @relation("StatusActorRole")
   dn_priority_actor DnPriorityHistory[] @relation("PriorityActorRole")
   dn_rush_actor     DnRushHistory[]     @relation("RushActorRole")
 
@@ -71,10 +71,10 @@ model Permission {
 }
 
 model RolePermission {
-  role_id        String @db.Uuid
-  permission_id  String @db.Uuid
-  role           Role       @relation(fields: [role_id], references: [id], onDelete: Cascade)
-  permission     Permission @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+  role_id       String     @db.Uuid
+  permission_id String     @db.Uuid
+  role          Role       @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permission_id], references: [id], onDelete: Cascade)
 
   @@id([role_id, permission_id])
   @@index([permission_id])
@@ -82,27 +82,27 @@ model RolePermission {
 }
 
 model User {
-  id            String   @id @default(uuid()) @db.Uuid
-  email         String   @unique @db.VarChar(255)
-  display_name  String?  @db.VarChar(255)
-  password_hash String?  @db.VarChar(255)
-  must_change_password Boolean @default(false)
-  is_active     Boolean  @default(true)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  id                   String   @id @default(uuid()) @db.Uuid
+  email                String   @unique @db.VarChar(255)
+  display_name         String?  @db.VarChar(255)
+  password_hash        String?  @db.VarChar(255)
+  must_change_password Boolean  @default(false)
+  is_active            Boolean  @default(true)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
 
-  user_roles_assigned    UserRole[] @relation("UserRoleUser")
-  user_roles_granted     UserRole[] @relation("UserRoleAssignedBy")
-  ui_preference          UserUiPreference?
-  import_batches_created ImportBatch[]
-  dn_status_history      DnStatusHistory[]
-  dn_priority_history    DnPriorityHistory[]
-  dn_rush_history          DnRushHistory[]
-  shipments              Shipment[]
-  picking_claimed_delivery_notes DeliveryNote[] @relation("PickingStartedBy")
-  packing_claimed_delivery_notes DeliveryNote[] @relation("PackingStartedBy")
-  shipping_claimed_delivery_notes DeliveryNote[] @relation("ShippingStartedBy")
-  pack_sessions_created          PackSession[]
+  user_roles_assigned             UserRole[]          @relation("UserRoleUser")
+  user_roles_granted              UserRole[]          @relation("UserRoleAssignedBy")
+  ui_preference                   UserUiPreference?
+  import_batches_created          ImportBatch[]
+  dn_status_history               DnStatusHistory[]
+  dn_priority_history             DnPriorityHistory[]
+  dn_rush_history                 DnRushHistory[]
+  shipments                       Shipment[]
+  picking_claimed_delivery_notes  DeliveryNote[]      @relation("PickingStartedBy")
+  packing_claimed_delivery_notes  DeliveryNote[]      @relation("PackingStartedBy")
+  shipping_claimed_delivery_notes DeliveryNote[]      @relation("ShippingStartedBy")
+  pack_sessions_created           PackSession[]
 
   @@map("users")
 }
@@ -113,8 +113,8 @@ model UserRole {
   assigned_at DateTime @default(now())
   assigned_by String?  @db.Uuid
 
-  user       User @relation("UserRoleUser", fields: [user_id], references: [id], onDelete: Cascade)
-  role       Role @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  user       User  @relation("UserRoleUser", fields: [user_id], references: [id], onDelete: Cascade)
+  role       Role  @relation(fields: [role_id], references: [id], onDelete: Cascade)
   assignedBy User? @relation("UserRoleAssignedBy", fields: [assigned_by], references: [id], onDelete: SetNull)
 
   @@id([user_id, role_id])
@@ -133,23 +133,23 @@ model UserUiPreference {
 }
 
 model ImportBatch {
-  id             String       @id @default(uuid()) @db.Uuid
-  source_type    source_type
-  file_name      String       @db.VarChar(255)
-  file_checksum  String?      @db.VarChar(128)
-  started_at     DateTime     @default(now())
-  completed_at   DateTime?
-  status         batch_status @default(RUNNING)
-  total_rows     Int          @default(0)
-  success_rows   Int          @default(0)
-  error_rows     Int          @default(0)
-  created_by     String?      @db.Uuid
+  id              String       @id @default(uuid()) @db.Uuid
+  source_type     source_type
+  file_name       String       @db.VarChar(255)
+  file_checksum   String?      @db.VarChar(128)
+  started_at      DateTime     @default(now())
+  completed_at    DateTime?
+  status          batch_status @default(RUNNING)
+  total_rows      Int          @default(0)
+  success_rows    Int          @default(0)
+  error_rows      Int          @default(0)
+  created_by      String?      @db.Uuid
   summary_message String?
 
-  creator          User?             @relation(fields: [created_by], references: [id], onDelete: SetNull)
-  row_errors       ImportRowError[]
-  delivery_notes   DeliveryNote[] @relation("LastSeenBatch")
-  created_delivery_notes DeliveryNote[] @relation("CreatedByBatch")
+  creator                User?            @relation(fields: [created_by], references: [id], onDelete: SetNull)
+  row_errors             ImportRowError[]
+  delivery_notes         DeliveryNote[]   @relation("LastSeenBatch")
+  created_delivery_notes DeliveryNote[]   @relation("CreatedByBatch")
 
   @@map("import_batches")
 }
@@ -172,23 +172,23 @@ model ImportRowError {
 }
 
 model Customer {
-  id                   String   @id @default(uuid()) @db.Uuid
-  sold_to_code         String   @unique @db.VarChar(30)
-  sold_to_name         String   @db.VarChar(255)
-  fed_id_number        String?  @db.VarChar(50)
-  default_contact_name String?  @db.VarChar(120)
-  default_phone        String?  @db.VarChar(50)
-  default_email        String?  @db.VarChar(255)
-  shipping_preference  String?
-  is_active            Boolean  @default(true)
+  id                          String   @id @default(uuid()) @db.Uuid
+  sold_to_code                String   @unique @db.VarChar(30)
+  sold_to_name                String   @db.VarChar(255)
+  fed_id_number               String?  @db.VarChar(50)
+  default_contact_name        String?  @db.VarChar(120)
+  default_phone               String?  @db.VarChar(50)
+  default_email               String?  @db.VarChar(255)
+  shipping_preference         String?
+  is_active                   Boolean  @default(true)
   /// When true, picker combine-with hints exclude this customer's DNs from clusters.
-  dn_combine_hints_disallowed Boolean @default(false)
-  created_at           DateTime @default(now())
-  updated_at           DateTime @updatedAt
+  dn_combine_hints_disallowed Boolean  @default(false)
+  created_at                  DateTime @default(now())
+  updated_at                  DateTime @updatedAt
 
-  ship_to_locations        ShipToLocation[]
+  ship_to_locations         ShipToLocation[]
   customer_carrier_accounts CustomerCarrierAccount[]
-  delivery_notes           DeliveryNote[]
+  delivery_notes            DeliveryNote[]
 
   @@map("customers")
 }
@@ -212,22 +212,22 @@ model Product {
 }
 
 model ShipToLocation {
-  id            String   @id @default(uuid()) @db.Uuid
-  customer_id   String   @db.Uuid
-  ship_to_code  String   @db.VarChar(30)
-  ship_to_name  String   @db.VarChar(255)
-  street1       String?  @db.VarChar(255)
-  street2       String?  @db.VarChar(255)
-  city          String?  @db.VarChar(120)
-  state_region  String?  @db.VarChar(120)
-  postal_code   String?  @db.VarChar(30)
-  country_code  String?  @db.VarChar(10)
-  country_name  String?  @db.VarChar(120)
-  contact_name  String?  @db.VarChar(120)
-  phone         String?  @db.VarChar(50)
-  is_active     Boolean  @default(true)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  id           String   @id @default(uuid()) @db.Uuid
+  customer_id  String   @db.Uuid
+  ship_to_code String   @db.VarChar(30)
+  ship_to_name String   @db.VarChar(255)
+  street1      String?  @db.VarChar(255)
+  street2      String?  @db.VarChar(255)
+  city         String?  @db.VarChar(120)
+  state_region String?  @db.VarChar(120)
+  postal_code  String?  @db.VarChar(30)
+  country_code String?  @db.VarChar(10)
+  country_name String?  @db.VarChar(120)
+  contact_name String?  @db.VarChar(120)
+  phone        String?  @db.VarChar(50)
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
 
   customer       Customer       @relation(fields: [customer_id], references: [id], onDelete: Restrict)
   delivery_notes DeliveryNote[]
@@ -238,15 +238,15 @@ model ShipToLocation {
 }
 
 model CustomerCarrierAccount {
-  id                String   @id @default(uuid()) @db.Uuid
-  customer_id       String   @db.Uuid
-  carrier_code      String   @db.VarChar(30)
-  account_number    String   @db.VarChar(80)
-  is_collect_enabled Boolean @default(true)
-  notes             String?
-  is_active         Boolean  @default(true)
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
+  id                 String   @id @default(uuid()) @db.Uuid
+  customer_id        String   @db.Uuid
+  carrier_code       String   @db.VarChar(30)
+  account_number     String   @db.VarChar(80)
+  is_collect_enabled Boolean  @default(true)
+  notes              String?
+  is_active          Boolean  @default(true)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
 
   customer Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
 
@@ -256,52 +256,52 @@ model CustomerCarrierAccount {
 }
 
 model DeliveryNote {
-  id                       String    @id @default(uuid()) @db.Uuid
-  dn_number                String    @unique @db.VarChar(30)
-  sold_to_code             String    @db.VarChar(30)
-  ship_to_code             String    @db.VarChar(30)
-  customer_id              String?   @db.Uuid
-  ship_to_location_id      String?   @db.Uuid
-  current_priority_no      Int?
-  is_rushed                Boolean   @default(false)
-  latest_rush_reason       String?
-  current_status           dn_status @default(NEW)
-  credit_status            String?   @db.VarChar(10)
-  shipping_type            String?   @db.VarChar(120)
-  charging_method          String?   @db.VarChar(40)
-  currency_code            String?   @db.VarChar(10)
-  dn_create_date           DateTime? @db.Date
-  requested_delivery_date  DateTime? @db.Date
-  projected_ship_date      DateTime? @db.Date
-  po_date                  DateTime? @db.Date
-  customer_po              String?   @db.VarChar(80)
-  ship_to_region_state     String?   @db.VarChar(120)
-  picking_started_by_user_id String? @db.Uuid
-  packing_started_by_user_id String? @db.Uuid
-  shipping_started_by_user_id String? @db.Uuid
+  id                          String     @id @default(uuid()) @db.Uuid
+  dn_number                   String     @unique @db.VarChar(30)
+  sold_to_code                String     @db.VarChar(30)
+  ship_to_code                String     @db.VarChar(30)
+  customer_id                 String?    @db.Uuid
+  ship_to_location_id         String?    @db.Uuid
+  current_priority_no         Int?
+  is_rushed                   Boolean    @default(false)
+  latest_rush_reason          String?
+  current_status              dn_status  @default(NEW)
+  credit_status               String?    @db.VarChar(10)
+  shipping_type               String?    @db.VarChar(120)
+  charging_method             String?    @db.VarChar(40)
+  currency_code               String?    @db.VarChar(10)
+  dn_create_date              DateTime?  @db.Date
+  requested_delivery_date     DateTime?  @db.Date
+  projected_ship_date         DateTime?  @db.Date
+  po_date                     DateTime?  @db.Date
+  customer_po                 String?    @db.VarChar(80)
+  ship_to_region_state        String?    @db.VarChar(120)
+  picking_started_by_user_id  String?    @db.Uuid
+  packing_started_by_user_id  String?    @db.Uuid
+  shipping_started_by_user_id String?    @db.Uuid
   /// Groups notes the shipper chose to ship together (set at start-shipping).
-  shipping_group_id        String?  @db.Uuid
+  shipping_group_id           String?    @db.Uuid
   /// Status the note was in before being put ON_HOLD (for resume).
-  on_hold_from_status      dn_status?
-  last_seen_import_batch_id String?  @db.Uuid
+  on_hold_from_status         dn_status?
+  last_seen_import_batch_id   String?    @db.Uuid
   /// Batch that created this note (null for pre-existing/manual notes).
-  created_by_import_batch_id String? @db.Uuid
-  is_open                  Boolean   @default(true)
-  created_at               DateTime  @default(now())
-  updated_at               DateTime  @updatedAt
+  created_by_import_batch_id  String?    @db.Uuid
+  is_open                     Boolean    @default(true)
+  created_at                  DateTime   @default(now())
+  updated_at                  DateTime   @updatedAt
 
-  customer              Customer?      @relation(fields: [customer_id], references: [id], onDelete: Restrict)
-  ship_to_location      ShipToLocation? @relation(fields: [ship_to_location_id], references: [id], onDelete: Restrict)
-  picking_started_by    User?          @relation("PickingStartedBy", fields: [picking_started_by_user_id], references: [id], onDelete: SetNull)
-  packing_started_by    User?          @relation("PackingStartedBy", fields: [packing_started_by_user_id], references: [id], onDelete: SetNull)
-  shipping_started_by   User?          @relation("ShippingStartedBy", fields: [shipping_started_by_user_id], references: [id], onDelete: SetNull)
-  last_seen_import_batch ImportBatch? @relation("LastSeenBatch", fields: [last_seen_import_batch_id], references: [id], onDelete: Restrict)
-  created_by_import_batch ImportBatch? @relation("CreatedByBatch", fields: [created_by_import_batch_id], references: [id], onDelete: SetNull)
-  lines                 DeliveryNoteLine[]
-  status_history        DnStatusHistory[]
-  priority_history      DnPriorityHistory[]
-  rush_history          DnRushHistory[]
-  shipments             Shipment[]
+  customer                 Customer?                 @relation(fields: [customer_id], references: [id], onDelete: Restrict)
+  ship_to_location         ShipToLocation?           @relation(fields: [ship_to_location_id], references: [id], onDelete: Restrict)
+  picking_started_by       User?                     @relation("PickingStartedBy", fields: [picking_started_by_user_id], references: [id], onDelete: SetNull)
+  packing_started_by       User?                     @relation("PackingStartedBy", fields: [packing_started_by_user_id], references: [id], onDelete: SetNull)
+  shipping_started_by      User?                     @relation("ShippingStartedBy", fields: [shipping_started_by_user_id], references: [id], onDelete: SetNull)
+  last_seen_import_batch   ImportBatch?              @relation("LastSeenBatch", fields: [last_seen_import_batch_id], references: [id], onDelete: Restrict)
+  created_by_import_batch  ImportBatch?              @relation("CreatedByBatch", fields: [created_by_import_batch_id], references: [id], onDelete: SetNull)
+  lines                    DeliveryNoteLine[]
+  status_history           DnStatusHistory[]
+  priority_history         DnPriorityHistory[]
+  rush_history             DnRushHistory[]
+  shipments                Shipment[]
   pack_session_memberships PackSessionDeliveryNote[]
 
   @@index([current_status, current_priority_no])
@@ -313,21 +313,21 @@ model DeliveryNote {
 }
 
 model DeliveryNoteLine {
-  id                 String    @id @default(uuid()) @db.Uuid
-  delivery_note_id   String    @db.Uuid
-  doc_item           Int
-  so_number          String?   @db.VarChar(30)
-  material_code      String?   @db.VarChar(80)
+  id                   String    @id @default(uuid()) @db.Uuid
+  delivery_note_id     String    @db.Uuid
+  doc_item             Int
+  so_number            String?   @db.VarChar(30)
+  material_code        String?   @db.VarChar(80)
   material_description String?
-  order_qty          Decimal?  @db.Decimal(18, 4)
-  open_qty           Decimal?  @db.Decimal(18, 4)
-  shipped_qty        Decimal?  @db.Decimal(18, 4)
-  unit_price         Decimal?  @db.Decimal(18, 4)
-  line_amount        Decimal?  @db.Decimal(18, 4)
-  delivery_date      DateTime? @db.Date
-  material_type      String?   @db.VarChar(40)
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @updatedAt
+  order_qty            Decimal?  @db.Decimal(18, 4)
+  open_qty             Decimal?  @db.Decimal(18, 4)
+  shipped_qty          Decimal?  @db.Decimal(18, 4)
+  unit_price           Decimal?  @db.Decimal(18, 4)
+  line_amount          Decimal?  @db.Decimal(18, 4)
+  delivery_date        DateTime? @db.Date
+  material_type        String?   @db.VarChar(40)
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
 
   delivery_note DeliveryNote @relation(fields: [delivery_note_id], references: [id], onDelete: Cascade)
 
@@ -337,15 +337,15 @@ model DeliveryNoteLine {
 }
 
 model DnStatusHistory {
-  id                String    @id @default(uuid()) @db.Uuid
-  delivery_note_id  String    @db.Uuid
-  from_status       dn_status?
-  to_status         dn_status
-  message           String?
-  actor_user_id     String    @db.Uuid
-  actor_role_id     String    @db.Uuid
-  changed_at        DateTime  @default(now())
-  source            String    @default("MANUAL") @db.VarChar(20)
+  id               String     @id @default(uuid()) @db.Uuid
+  delivery_note_id String     @db.Uuid
+  from_status      dn_status?
+  to_status        dn_status
+  message          String?
+  actor_user_id    String     @db.Uuid
+  actor_role_id    String     @db.Uuid
+  changed_at       DateTime   @default(now())
+  source           String     @default("MANUAL") @db.VarChar(20)
 
   delivery_note DeliveryNote @relation(fields: [delivery_note_id], references: [id], onDelete: Cascade)
   actor_user    User         @relation(fields: [actor_user_id], references: [id], onDelete: Restrict)
@@ -357,15 +357,15 @@ model DnStatusHistory {
 }
 
 model DnPriorityHistory {
-  id                String   @id @default(uuid()) @db.Uuid
-  delivery_note_id  String   @db.Uuid
-  from_priority_no  Int?
-  to_priority_no    Int
-  reason            String?
-  actor_user_id     String   @db.Uuid
-  actor_role_id     String?  @db.Uuid
-  changed_at        DateTime @default(now())
-  source            String   @default("MANUAL") @db.VarChar(20)
+  id               String   @id @default(uuid()) @db.Uuid
+  delivery_note_id String   @db.Uuid
+  from_priority_no Int?
+  to_priority_no   Int
+  reason           String?
+  actor_user_id    String   @db.Uuid
+  actor_role_id    String?  @db.Uuid
+  changed_at       DateTime @default(now())
+  source           String   @default("MANUAL") @db.VarChar(20)
 
   delivery_note DeliveryNote @relation(fields: [delivery_note_id], references: [id], onDelete: Cascade)
   actor_user    User         @relation(fields: [actor_user_id], references: [id], onDelete: Restrict)
@@ -404,6 +404,12 @@ model Shipment {
   tracking_number        String?  @db.VarChar(80)
   /// One invoice number per delivery note, entered when marking shipped.
   invoice_number         String?  @db.VarChar(80)
+  /// Selected rate quote saved when marking shipped. The fee is the group
+  /// total, stored per delivery note like the shared tracking number.
+  quoted_fee             Decimal? @db.Decimal(12, 2)
+  quoted_fee_currency    String?  @db.VarChar(3)
+  quoted_service_code    String?  @db.VarChar(60)
+  quoted_service_name    String?  @db.VarChar(120)
   shipment_reference     String?  @db.VarChar(120)
   ship_date              DateTime @db.Date
   shipper_user_id        String   @db.Uuid
@@ -421,14 +427,14 @@ model Shipment {
 
 /// One packing operation: one or more DNs (combined or single) moved PICKED→PACKING together, then PACKED with one or more boxes.
 model PackSession {
-  id                 String    @id @default(uuid()) @db.Uuid
-  created_by_user_id String    @db.Uuid
-  created_at         DateTime  @default(now())
-  completed_at       DateTime?
+  id                   String    @id @default(uuid()) @db.Uuid
+  created_by_user_id   String    @db.Uuid
+  created_at           DateTime  @default(now())
+  completed_at         DateTime?
   /// Free-text note from packer when marking the session packed (e.g. cart label).
-  pack_completion_note String? @db.Text
+  pack_completion_note String?   @db.Text
 
-  creator        User                       @relation(fields: [created_by_user_id], references: [id], onDelete: Restrict)
+  creator        User                      @relation(fields: [created_by_user_id], references: [id], onDelete: Restrict)
   delivery_notes PackSessionDeliveryNote[]
   boxes          PackBox[]
 
@@ -465,4 +471,31 @@ model PackBox {
 
   @@index([pack_session_id, sort_order])
   @@map("pack_boxes")
+}
+
+/// Carrier API credentials for live rate quotes (FedEx / UPS), one row per
+/// carrier per environment. Secrets are AES-256-GCM encrypted at rest.
+model CarrierRateConfig {
+  id                String   @id @default(uuid()) @db.Uuid
+  carrier_code      String   @db.VarChar(20)
+  environment       String   @db.VarChar(20)
+  client_id         String   @db.VarChar(200)
+  client_secret_enc String   @db.Text
+  account_number    String?  @db.VarChar(80)
+  is_enabled        Boolean  @default(true)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@unique([carrier_code, environment])
+  @@map("carrier_rate_configs")
+}
+
+/// Simple key/value application settings (e.g. the warehouse origin address
+/// used for carrier rate quotes, stored as JSON under "rate_quote_origin").
+model AppSetting {
+  key        String   @id @db.VarChar(120)
+  value      String   @db.Text
+  updated_at DateTime @updatedAt
+
+  @@map("app_settings")
 }

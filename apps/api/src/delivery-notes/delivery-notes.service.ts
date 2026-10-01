@@ -1308,6 +1308,10 @@ export class DeliveryNotesService {
         invoice_number: true,
         ship_date: true,
         carrier_code: true,
+        quoted_fee: true,
+        quoted_fee_currency: true,
+        quoted_service_code: true,
+        quoted_service_name: true,
         shipper: {
           select: { id: true, email: true, display_name: true },
         },
@@ -1349,6 +1353,10 @@ export class DeliveryNotesService {
             invoice_number: latestShipmentRow.invoice_number?.trim() || null,
             ship_date: latestShipmentRow.ship_date.toISOString().slice(0, 10),
             carrier_code: latestShipmentRow.carrier_code,
+            quoted_fee: latestShipmentRow.quoted_fee,
+            quoted_fee_currency: latestShipmentRow.quoted_fee_currency,
+            quoted_service_code: latestShipmentRow.quoted_service_code,
+            quoted_service_name: latestShipmentRow.quoted_service_name,
             shipped_by: latestShipmentRow.shipper
               ? this.serializeWorkflowActor(latestShipmentRow.shipper)
               : null,
@@ -1367,6 +1375,13 @@ export class DeliveryNotesService {
     confirmDoubleClaim?: boolean,
     shipTogetherIds?: string[],
     invoiceNumbers?: { deliveryNoteId: string; invoiceNumber: string }[],
+    rateQuote?: {
+      carrierCode: string;
+      serviceCode: string;
+      serviceName: string;
+      currency: string;
+      totalCharge: number;
+    },
   ) {
     // Warn if the shipper already has another note in SHIPPING_IN_PROGRESS.
     if (toStatus === dn_status.SHIPPING_IN_PROGRESS && !confirmDoubleClaim) {
@@ -1398,6 +1413,7 @@ export class DeliveryNotesService {
         {
           shipTogetherIds,
           invoiceNumbers,
+          rateQuote,
         },
       );
     });
@@ -1423,6 +1439,13 @@ export class DeliveryNotesService {
     options?: {
       shipTogetherIds?: string[];
       invoiceNumbers?: { deliveryNoteId: string; invoiceNumber: string }[];
+      rateQuote?: {
+        carrierCode: string;
+        serviceCode: string;
+        serviceName: string;
+        currency: string;
+        totalCharge: number;
+      };
     },
   ): Promise<void> {
     const anchor = await tx.deliveryNote.findUnique({
@@ -1606,6 +1629,10 @@ export class DeliveryNotesService {
           ship_date: new Date(),
           shipper_user_id: payload.sub,
           service_level: m.shipping_type?.trim() || null,
+          quoted_fee: options?.rateQuote ? options.rateQuote.totalCharge : null,
+          quoted_fee_currency: options?.rateQuote?.currency?.trim() || null,
+          quoted_service_code: options?.rateQuote?.serviceCode?.trim() || null,
+          quoted_service_name: options?.rateQuote?.serviceName?.trim() || null,
         },
       });
     }

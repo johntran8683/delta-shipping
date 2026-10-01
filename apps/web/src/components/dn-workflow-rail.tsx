@@ -51,6 +51,13 @@ export type DnWorkflowRailProps = {
   onRushSave: (rushed: boolean, reason: string) => Promise<boolean>;
   handoff?: RailHandoff | null;
   statusHistory: StatusHistoryEntry[];
+  /** Latest shipment info shown once the note is SHIPPED. */
+  shipment?: {
+    tracking_number: string | null;
+    quoted_fee?: string | null;
+    quoted_fee_currency?: string | null;
+    quoted_service_name?: string | null;
+  } | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -443,6 +450,7 @@ export function DnWorkflowRail(props: DnWorkflowRailProps) {
     onRushSave,
     handoff,
     statusHistory,
+    shipment,
   } = props;
 
   const s = normStatus(status);
@@ -624,9 +632,43 @@ export function DnWorkflowRail(props: DnWorkflowRailProps) {
             </p>
           </div>
         ) : s === "SHIPPED" ? (
-          <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-            Shipped — this note is complete.
-          </p>
+          <div className="mt-4 space-y-2">
+            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+              Shipped — this note is complete.
+            </p>
+            {shipment &&
+            (shipment.tracking_number || shipment.quoted_fee) ? (
+              <dl className="rounded-lg border border-slate-200/80 bg-white/60 px-3 py-2 text-xs dark:border-slate-700/70 dark:bg-slate-950/40">
+                {shipment.tracking_number ? (
+                  <div className="flex items-center justify-between gap-2 py-0.5">
+                    <dt className="text-slate-500 dark:text-slate-400">
+                      Tracking
+                    </dt>
+                    <dd className="font-mono font-medium text-slate-800 dark:text-slate-100">
+                      {shipment.tracking_number}
+                    </dd>
+                  </div>
+                ) : null}
+                {shipment.quoted_fee ? (
+                  <div className="flex items-center justify-between gap-2 py-0.5">
+                    <dt className="text-slate-500 dark:text-slate-400">
+                      Est. fee
+                    </dt>
+                    <dd className="font-medium tabular-nums text-slate-800 dark:text-slate-100">
+                      {shipment.quoted_fee_currency
+                        ? `${shipment.quoted_fee_currency} ${Number(shipment.quoted_fee).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : shipment.quoted_fee}
+                      {shipment.quoted_service_name ? (
+                        <span className="ml-1.5 font-normal text-slate-500 dark:text-slate-400">
+                          {shipment.quoted_service_name}
+                        </span>
+                      ) : null}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            ) : null}
+          </div>
         ) : null}
 
         {showUnpack ? (

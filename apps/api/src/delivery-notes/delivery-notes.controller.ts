@@ -210,6 +210,7 @@ export class DeliveryNotesController {
       dto.confirmDoubleClaim,
       dto.shipTogetherIds,
       dto.invoiceNumbers,
+      dto.rateQuote,
     );
   }
 

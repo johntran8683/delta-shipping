@@ -75,6 +75,10 @@ function isDnCombinationRulesSettingsPath(path: string) {
   return path === "/settings/dn-combination-rules";
 }
 
+function isCarrierRatesSettingsPath(path: string) {
+  return path === "/settings/carrier-rates";
+}
+
 type MeUserRole = { code: string; name: string };
 
 type MeSnapshot = {
@@ -967,6 +971,33 @@ export function OperationsShell({
                           title="DNs combination rules"
                         >
                           C
+                        </span>
+                      )}
+                    </Link>
+                  ) : null}
+                  {roleCanManageUsers ? (
+                    <Link
+                      href="/settings/carrier-rates"
+                      onClick={closeMobileNav}
+                      title="Carrier rates"
+                      aria-current={
+                        isCarrierRatesSettingsPath(pathname)
+                          ? "page"
+                          : undefined
+                      }
+                      className={leafClass(
+                        isCarrierRatesSettingsPath(pathname),
+                        sidebarCollapsed,
+                      )}
+                    >
+                      {!sidebarCollapsed ? (
+                        <span className="pl-1">Carrier rates</span>
+                      ) : (
+                        <span
+                          className={navIconBadgeClass()}
+                          title="Carrier rates"
+                        >
+                          R
                         </span>
                       )}
                     </Link>

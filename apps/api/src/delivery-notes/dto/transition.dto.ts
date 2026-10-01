@@ -5,10 +5,12 @@ import {
   IsBoolean,
   IsEnum,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  Min,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
@@ -23,6 +25,33 @@ export class ShipmentInvoiceDto {
   @IsString()
   @MaxLength(80)
   invoiceNumber!: string;
+}
+
+/** Selected rate quote from the Estimate fee panel, saved at mark-shipped. */
+export class ShipmentRateQuoteDto {
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(20)
+  carrierCode!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(60)
+  serviceCode!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(120)
+  serviceName!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(3)
+  currency!: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  totalCharge!: number;
 }
 
 export class TransitionDto {
@@ -69,4 +98,15 @@ export class TransitionDto {
   @IsOptional()
   @IsBoolean()
   confirmDoubleClaim?: boolean;
+
+  /**
+   * Selected live rate quote, saved onto each created Shipment row. Only for
+   * SHIPPED; the fee is the shipment-group total (stored per note like the
+   * shared tracking number).
+   */
+  @ValidateIf((o: TransitionDto) => o.toStatus === dn_status.SHIPPED)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ShipmentRateQuoteDto)
+  rateQuote?: ShipmentRateQuoteDto;
 }

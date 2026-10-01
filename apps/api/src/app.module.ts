@@ -11,6 +11,7 @@ import { AccessControlModule } from './access-control/access-control.module';
 import { MeModule } from './me/me.module';
 import { UsersModule } from './users/users.module';
 import { CustomersModule } from './customers/customers.module';
+import { CarrierRatesModule } from './carrier-rates/carrier-rates.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { CustomersModule } from './customers/customers.module';
     AccessControlModule,
     MeModule,
     CustomersModule,
+    CarrierRatesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

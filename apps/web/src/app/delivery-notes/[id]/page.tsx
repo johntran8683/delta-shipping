@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { OperationsShell } from "@/components/operations-shell";
 import { StatusBadgeWithHover } from "@/components/status-badge-with-hover";
@@ -15,6 +16,10 @@ import { DeliveryNoteNumber } from "@/components/delivery-note-number";
 import { formatDeliveryNoteNumber } from "@/lib/format-dn-number";
 import { formatDateOnly } from "@/lib/format-date";
 import { type WorkflowHandoff } from "@/components/shipper-dn-detail";
+import {
+  RateQuoteEstimator,
+  type RateQuoteSelection,
+} from "@/components/rate-quote-estimator";
 import {
   DnWorkflowRail,
   type PrimaryActionKey,
@@ -122,6 +127,10 @@ type Detail = {
     invoice_number?: string | null;
     ship_date: string;
     carrier_code: string;
+    quoted_fee?: string | null;
+    quoted_fee_currency?: string | null;
+    quoted_service_code?: string | null;
+    quoted_service_name?: string | null;
   } | null;
   workflow_handoff?: WorkflowHandoff | null;
 };
@@ -426,18 +435,155 @@ function CombinedPackSessionBanner({
   );
 }
 
+/** Pounds-to-kilograms factor for the dual-unit package weight display. */
+const LB_TO_KG = 0.45359237;
+
+function formatBoxDecimal(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function sumBoxWeight(
+  boxes: { weight_lb: string }[],
+): { lb: string; kg: string } | null {
+  if (boxes.length === 0) return null;
+  let sum = 0;
+  let anyValid = false;
+  for (const b of boxes) {
+    const n = Number.parseFloat((b.weight_lb ?? "").trim());
+    if (!Number.isFinite(n)) continue;
+    sum += n;
+    anyValid = true;
+  }
+  if (!anyValid) return null;
+  return { lb: formatBoxDecimal(sum), kg: formatBoxDecimal(sum * LB_TO_KG) };
+}
+
+/** "24×18×12" for display, or null when any dimension is missing. */
+function formatBoxSizeDisplay(box: {
+  length_in: string;
+  width_in: string;
+  height_in: string;
+}): string | null {
+  const l = (box.length_in ?? "").trim();
+  const w = (box.width_in ?? "").trim();
+  const h = (box.height_in ?? "").trim();
+  if (!l || !w || !h) return null;
+  return `${l}×${w}×${h}`;
+}
+
+/**
+ * Copy text for the box sizes only (plain "x" separators for pasting):
+ * "Box sizes (in): 24x18x12, 20x16x10". Empty when no box has dimensions.
+ */
+function buildBoxSizesCopyText(
+  boxes: { length_in: string; width_in: string; height_in: string }[],
+): string {
+  const sizes: string[] = [];
+  for (const b of boxes) {
+    const l = (b.length_in ?? "").trim();
+    const w = (b.width_in ?? "").trim();
+    const h = (b.height_in ?? "").trim();
+    if (!l || !w || !h) continue;
+    sizes.push(`${l}x${w}x${h}`);
+  }
+  if (sizes.length === 0) return "";
+  return `Box sizes (in): ${sizes.join(", ")}`;
+}
+
+function CopyTextButton({
+  value,
+  label,
+  children,
+}: {
+  value: string;
+  label: string;
+  children?: ReactNode;
+}) {
+  const [copied, setCopied] = useState(false);
+  const trimmed = value.trim();
+
+  const copy = useCallback(async () => {
+    if (!trimmed) return;
+    try {
+      await navigator.clipboard.writeText(trimmed);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }, [trimmed]);
+
+  if (!trimmed) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-slate-100"
+    >
+      {copied ? (
+        <span className="text-emerald-700 dark:text-emerald-400">Copied</span>
+      ) : (
+        (children ?? `Copy ${label}`)
+      )}
+    </button>
+  );
+}
+
+function PackageSummaryLine({
+  boxes,
+  rateEstimator,
+}: {
+  boxes: CompletedPackSession["boxes"];
+  rateEstimator?: ReactNode;
+}) {
+  const weight = sumBoxWeight(boxes);
+  const sizeDisplays: string[] = [];
+  for (const b of boxes) {
+    const s = formatBoxSizeDisplay(b);
+    if (s) sizeDisplays.push(s);
+  }
+  const boxSizesCopyText = buildBoxSizesCopyText(boxes);
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+        {boxes.length} box{boxes.length === 1 ? "" : "es"}
+        {weight ? ` · ${weight.lb} lb (${weight.kg} kg) total` : ""}
+      </p>
+      {sizeDisplays.length > 0 ? (
+        <span className="inline-flex flex-wrap items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+          <span>Sizes (in): {sizeDisplays.join(", ")}</span>
+          <CopyTextButton value={boxSizesCopyText} label="box sizes" />
+        </span>
+      ) : null}
+      {rateEstimator ? (
+        <span className="inline-flex items-center">{rateEstimator}</span>
+      ) : null}
+    </div>
+  );
+}
+
 function CompletedPackResultBanner({
   session,
   currentDnId,
   totalSessionCount,
   editable,
   onEdit,
+  readOnly,
+  rateEstimator,
 }: {
   session: CompletedPackSession;
   currentDnId: string;
   totalSessionCount: number;
   editable?: boolean;
   onEdit?: () => void;
+  /** Shown while shipping is in progress: boxes stay visible but not editable. */
+  readOnly?: boolean;
+  /** Rate-estimate controls rendered beside the package summary. */
+  rateEstimator?: ReactNode;
 }) {
   const notes = session.delivery_notes;
   const boxes = session.boxes ?? [];
@@ -572,6 +718,7 @@ function CompletedPackResultBanner({
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Recorded boxes
           </p>
+          <PackageSummaryLine boxes={boxes} rateEstimator={rateEstimator} />
           <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200/80 bg-white/70 dark:border-slate-700/80 dark:bg-slate-950/50">
             <table className="w-full min-w-[320px] border-collapse text-left">
               <thead>
@@ -982,6 +1129,15 @@ export default function DeliveryNoteDetailPage() {
   >([]);
   const [shipInvoices, setShipInvoices] = useState<Record<string, string>>({});
   const [shipGroupLoading, setShipGroupLoading] = useState(false);
+  const [shipRateQuote, setShipRateQuote] =
+    useState<RateQuoteSelection | null>(null);
+
+  const detailStatus = detail?.current_status;
+  useEffect(() => {
+    if (detailStatus && detailStatus !== "SHIPPING_IN_PROGRESS") {
+      setShipRateQuote(null);
+    }
+  }, [id, detailStatus]);
 
   useEffect(() => {
     setPortalMounted(true);
@@ -1045,6 +1201,7 @@ export default function DeliveryNoteDetailPage() {
       confirmDoubleClaim?: boolean;
       shipTogetherIds?: string[];
       invoiceNumbers?: { deliveryNoteId: string; invoiceNumber: string }[];
+      rateQuote?: RateQuoteSelection | null;
     },
   ): Promise<boolean> {
     const token = getAccessToken();
@@ -1059,6 +1216,13 @@ export default function DeliveryNoteDetailPage() {
         confirmDoubleClaim?: boolean;
         shipTogetherIds?: string[];
         invoiceNumbers?: { deliveryNoteId: string; invoiceNumber: string }[];
+        rateQuote?: {
+          carrierCode: string;
+          serviceCode: string;
+          serviceName: string;
+          currency: string;
+          totalCharge: number;
+        };
       } = { toStatus };
       const trimmedTracking = opts?.trackingNumber?.trim();
       if (trimmedTracking) body.trackingNumber = trimmedTracking;
@@ -1069,6 +1233,15 @@ export default function DeliveryNoteDetailPage() {
         body.shipTogetherIds = opts.shipTogetherIds;
       if (opts?.invoiceNumbers?.length)
         body.invoiceNumbers = opts.invoiceNumbers;
+      if (opts?.rateQuote) {
+        body.rateQuote = {
+          carrierCode: opts.rateQuote.carrierCode,
+          serviceCode: opts.rateQuote.serviceCode,
+          serviceName: opts.rateQuote.serviceName,
+          currency: opts.rateQuote.currency,
+          totalCharge: opts.rateQuote.totalCharge,
+        };
+      }
       const res = await fetch(`${apiBase}/delivery-notes/${id}/transition`, {
         method: "POST",
         headers: authHeaders(),
@@ -1338,6 +1511,7 @@ export default function DeliveryNoteDetailPage() {
     const ok = await runStatusTransition("SHIPPED", {
       trackingNumber: tracking,
       invoiceNumbers,
+      rateQuote: shipRateQuote,
     });
     if (ok) closeMarkShippedModal();
   }
@@ -1797,14 +1971,31 @@ export default function DeliveryNoteDetailPage() {
           />
         ) : null}
         {detail &&
-        detail.current_status === "PACKED" &&
+        (detail.current_status === "PACKED" ||
+          detail.current_status === "SHIPPING_IN_PROGRESS") &&
         detail.completed_pack_sessions?.[0] ? (
           <CompletedPackResultBanner
             session={detail.completed_pack_sessions[0]}
             currentDnId={detail.id}
             totalSessionCount={detail.completed_pack_sessions.length}
-            editable={canEditPackResult()}
-            onEdit={canEditPackResult() ? openEditPackResultModal : undefined}
+            editable={
+              detail.current_status === "PACKED" && canEditPackResult()
+            }
+            onEdit={
+              canEditPackResult() && detail.current_status === "PACKED"
+                ? openEditPackResultModal
+                : undefined
+            }
+            readOnly={detail.current_status === "SHIPPING_IN_PROGRESS"}
+            rateEstimator={
+              detail.current_status === "SHIPPING_IN_PROGRESS" ? (
+                <RateQuoteEstimator
+                  deliveryNoteId={detail.id}
+                  selected={shipRateQuote}
+                  onSelect={setShipRateQuote}
+                />
+              ) : undefined
+            }
           />
         ) : null}
 
@@ -1843,6 +2034,7 @@ export default function DeliveryNoteDetailPage() {
                 onRushSave={saveRushFromModal}
                 handoff={detail.workflow_handoff}
                 statusHistory={detail.status_history as StatusHistoryEntry[]}
+                shipment={detail.latest_shipment}
               />
             </div>
           </div>
@@ -2686,6 +2878,32 @@ export default function DeliveryNoteDetailPage() {
                     ) : (
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         No other notes in this shipment.
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="mb-1.5 text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">
+                      Rate estimate
+                    </p>
+                    {shipRateQuote ? (
+                      <p className="rounded-xl border border-emerald-200/90 bg-emerald-50/80 px-3 py-2.5 text-xs text-emerald-900 dark:border-emerald-800/70 dark:bg-emerald-950/40 dark:text-emerald-200">
+                        {shipRateQuote.carrierName} ·{" "}
+                        {shipRateQuote.serviceName} —{" "}
+                        <span className="font-semibold tabular-nums">
+                          {formatMoney(
+                            String(shipRateQuote.totalCharge),
+                            shipRateQuote.currency,
+                          )}
+                        </span>
+                        <span className="mt-0.5 block text-[11px] opacity-80">
+                          Saved on the shipment with this tracking number.
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        No estimate selected — you can pick one from Estimate
+                        fee next to the package summary before marking shipped.
                       </p>
                     )}
                   </div>
