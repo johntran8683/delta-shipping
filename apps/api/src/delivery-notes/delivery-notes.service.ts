@@ -28,6 +28,11 @@ import {
 import { sameShipGroup, splitShipGroupOptions } from './ship-group.policy';
 import { parseChargingMethod } from './charging-method';
 import {
+  CIRCLE_COUNT_STATUSES,
+  buildCircleCountResult,
+  normalizePartNumbers,
+} from './circle-count.policy';
+import {
   ALL_DN_STATUSES,
   SUPERVISING_ROLES,
   getTransitionMeta,
@@ -1082,6 +1087,54 @@ export class DeliveryNotesService {
       }
       doc.end();
     });
+  }
+
+  /**
+   * Circle Count: find the searched parts on delivery notes in PICKED,
+   * PACKING, PACKED, or SHIPPING (in progress). Available to every role
+   * except CSA.
+   */
+  async circleCount(partNumbers: string[], payload: JwtPayload) {
+    const role = await this.prisma.role.findUnique({
+      where: { id: payload.activeRoleId },
+    });
+    if (role?.code === 'CSA') {
+      throw new ForbiddenException(
+        'Circle Count is not available for the CSA role.',
+      );
+    }
+    const parts = normalizePartNumbers(partNumbers);
+    if (parts.length === 0) {
+      throw new BadRequestException('Enter at least one part number.');
+    }
+    const lines = await this.prisma.deliveryNoteLine.findMany({
+      where: {
+        material_code: { in: parts },
+        delivery_note: { current_status: { in: CIRCLE_COUNT_STATUSES } },
+      },
+      select: {
+        material_code: true,
+        material_description: true,
+        shipped_qty: true,
+        delivery_note: {
+          select: {
+            id: true,
+            dn_number: true,
+            current_status: true,
+            current_priority_no: true,
+            sold_to_code: true,
+            customer: { select: { sold_to_name: true } },
+            packing_started_by: {
+              select: { display_name: true, email: true },
+            },
+            shipping_started_by: {
+              select: { display_name: true, email: true },
+            },
+          },
+        },
+      },
+    });
+    return buildCircleCountResult(parts, lines);
   }
 
   /** Daily counts for the current Vancouver calendar day. */

@@ -32,3 +32,9 @@ export function canWriteCustomers(role: string | null | undefined): boolean {
   const code = role?.trim().toUpperCase();
   return code === "CSA" || code === "SUPERVISOR" || code === "SYSTEM";
 }
+
+/** Circle Count nav: every role except CSA. */
+export function canUseCircleCount(role: string | null | undefined): boolean {
+  const code = role?.trim().toUpperCase();
+  return !!code && code !== "CSA";
+}

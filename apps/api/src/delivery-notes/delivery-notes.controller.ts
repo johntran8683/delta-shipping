@@ -18,6 +18,7 @@ import { CurrentPayload } from '../auth/decorators/current-payload.decorator';
 import type { JwtPayload } from '../auth/jwt-payload';
 import { DeliveryNotesService } from './delivery-notes.service';
 import { BulkTransitionDto } from './dto/bulk-transition.dto';
+import { CircleCountDto } from './dto/circle-count.dto';
 import { CompletePackDto } from './dto/complete-pack.dto';
 import { ListDeliveryNotesQueryDto } from './dto/list-delivery-notes.query.dto';
 import {
@@ -77,6 +78,16 @@ export class DeliveryNotesController {
       payload,
       dto.message,
     );
+  }
+
+  /** Circle Count: locate parts on open delivery notes (all roles except CSA). */
+  @Post('circle-count')
+  @RequirePermissions('dn.read')
+  circleCount(
+    @Body() dto: CircleCountDto,
+    @CurrentPayload() payload: JwtPayload,
+  ) {
+    return this.deliveryNotes.circleCount(dto.partNumbers, payload);
   }
 
   /** Part auto-fill for the manual DN form (most recent description/price). */

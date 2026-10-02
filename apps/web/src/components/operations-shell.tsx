@@ -16,6 +16,7 @@ import { formatDnStatusLabel } from "@/lib/dn-status";
 import {
   canSeeCustomersNav,
   canSeeImportNav,
+  canUseCircleCount,
   canUseDataImport,
   canUseShippingIdsImport,
 } from "@/lib/import-access";
@@ -486,6 +487,7 @@ export function OperationsShell({
   const roleCanShippingIdsImport = canUseShippingIdsImport(role);
   const roleCanImport = canSeeImportNav(role);
   const roleCanCustomers = canSeeCustomersNav(role);
+  const roleCanCircleCount = canUseCircleCount(role);
 
   function leafClass(active: boolean, collapsed: boolean) {
     const base =
@@ -532,7 +534,7 @@ export function OperationsShell({
         onClose={() => setRoleSwitchFeedback(null)}
       />
       {/* Mobile top bar */}
-      <header className="sticky top-0 z-30 flex h-[3.25rem] items-center justify-between gap-2 border-b border-[var(--app-sidebar-border)] bg-[var(--app-sidebar-bg)] px-3 md:hidden">
+      <header className="sticky top-0 z-30 flex h-[3.25rem] items-center justify-between gap-2 border-b border-[var(--app-sidebar-border)] bg-[var(--app-sidebar-bg)] px-3 print:hidden md:hidden">
         <button
           type="button"
           aria-expanded={mobileNavOpen}
@@ -582,7 +584,7 @@ export function OperationsShell({
         <aside
           id="operations-mobile-drawer"
           className={
-            "fixed inset-y-0 left-0 z-50 flex w-[min(17.5rem,88vw)] flex-col border-r border-[var(--app-sidebar-border)] bg-[var(--app-sidebar-bg)] text-[var(--app-sidebar-fg)] shadow-xl transition-transform duration-200 ease-out md:static md:z-0 md:min-h-screen md:translate-x-0 md:shadow-none " +
+            "fixed inset-y-0 left-0 z-50 flex w-[min(17.5rem,88vw)] flex-col border-r border-[var(--app-sidebar-border)] bg-[var(--app-sidebar-bg)] text-[var(--app-sidebar-fg)] shadow-xl transition-transform duration-200 ease-out print:hidden md:static md:z-0 md:min-h-screen md:translate-x-0 md:shadow-none " +
             (sidebarCollapsed ? "md:w-[4.25rem]" : "md:w-56") +
             " " +
             (mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0")
@@ -652,6 +654,19 @@ export function OperationsShell({
               <span className={navIconBadgeClass()}>DN</span>
               {!sidebarCollapsed ? <span>Delivery notes</span> : null}
             </Link>
+
+            {roleCanCircleCount ? (
+              <Link
+                href="/circle-count"
+                onClick={closeMobileNav}
+                title="Circle Count"
+                aria-current={pathname === "/circle-count" ? "page" : undefined}
+                className={leafClass(pathname === "/circle-count", sidebarCollapsed)}
+              >
+                <span className={navIconBadgeClass()}>CC</span>
+                {!sidebarCollapsed ? <span>Circle Count</span> : null}
+              </Link>
+            ) : null}
 
             {roleCanCustomers ? (
               <Link
