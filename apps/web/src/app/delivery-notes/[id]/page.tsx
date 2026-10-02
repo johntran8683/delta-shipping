@@ -575,87 +575,98 @@ function RecordedBoxesCard({
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-700/70 dark:bg-slate-950/40">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800/80">
-        <div className="min-w-0">
-          <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
-            Recorded boxes
-          </h3>
-          <p className="mt-0.5 text-xs tabular-nums text-slate-500 dark:text-slate-400">
-            <span className="font-semibold text-slate-800 dark:text-slate-200">
-              {boxes.length} box{boxes.length === 1 ? "" : "es"}
-            </span>
-            {weight ? (
-              <>
-                {" · "}
-                <span className="font-semibold text-slate-800 dark:text-slate-200">
-                  {weight.lb} lb ({weight.kg} kg)
-                </span>{" "}
-                total
-              </>
-            ) : null}
-          </p>
-        </div>
+        <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
+          Recorded boxes
+        </h3>
         {rateEstimator ? (
           <div className="flex shrink-0 items-center">{rateEstimator}</div>
         ) : null}
       </div>
-      {sizeGroups.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-slate-100 px-4 py-2.5 dark:border-slate-800/80">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-            Sizes (in)
-          </span>
-          <ul className="flex list-none flex-wrap items-center gap-1.5 p-0" role="list">
-            {sizeGroups.map(({ display, count }) => (
-              <li
-                key={display}
-                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs tabular-nums text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-              >
-                <span className="font-semibold">{display}</span>
-                {count > 1 ? (
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                    ({count})
-                  </span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          <CopyTextButton value={boxSizesCopyText} label="box sizes" />
+      <div className="grid sm:grid-cols-[230px_minmax(0,1fr)]">
+        <div className="space-y-3.5 border-b border-slate-100 px-4 py-3.5 dark:border-slate-800/80 sm:border-b-0 sm:border-r">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Total boxes
+            </p>
+            <p className="mt-0.5 text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+              {boxes.length}
+            </p>
+          </div>
+          {weight ? (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Total weight
+              </p>
+              <p className="mt-0.5 text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                {weight.lb} lb
+                <span className="ml-1.5 text-xs font-medium text-slate-400 dark:text-slate-500">
+                  ({weight.kg} kg)
+                </span>
+              </p>
+            </div>
+          ) : null}
+          {sizeGroups.length > 0 ? (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Sizes (in)
+              </p>
+              <ul className="mt-1.5 flex list-none flex-wrap items-center gap-1.5 p-0" role="list">
+                {sizeGroups.map(({ display, count }) => (
+                  <li
+                    key={display}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs tabular-nums text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  >
+                    <span className="font-semibold">{display}</span>
+                    {count > 1 ? (
+                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                        ({count})
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2">
+                <CopyTextButton value={boxSizesCopyText} label="box sizes" />
+              </div>
+            </div>
+          ) : null}
         </div>
-      ) : null}
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[320px] border-collapse text-left">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
-              <th className="px-4 py-2">Box</th>
-              <th className="px-3 py-2">Weight</th>
-              <th className="px-4 py-2">L × W × H (in)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {boxes.map((b) => {
-              const bn = b.box_number?.trim();
-              const label = bn ? bn : `Box ${b.sort_order + 1}`;
-              return (
-                <tr
-                  key={b.id}
-                  className="border-b border-slate-50 transition last:border-b-0 hover:bg-slate-50/80 dark:border-slate-800/60 dark:hover:bg-slate-900/60"
-                >
-                  <td className="px-4 py-2 font-mono text-sm font-semibold tabular-nums tracking-tight text-slate-900 dark:text-slate-50">
-                    {label}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-sm tabular-nums text-slate-700 dark:text-slate-200">
-                    <span className="font-semibold">{b.weight_lb}</span>
-                    <span className="ml-1 text-xs font-medium text-slate-400 dark:text-slate-500">
-                      lb
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 font-mono text-sm font-medium tabular-nums text-slate-700 dark:text-slate-200">
-                    {b.length_in} × {b.width_in} × {b.height_in}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[280px] border-collapse text-left">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
+                <th className="px-4 py-2">Box</th>
+                <th className="px-3 py-2">Weight</th>
+                <th className="px-4 py-2">L × W × H (in)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {boxes.map((b) => {
+                const bn = b.box_number?.trim();
+                const label = bn ? bn : `Box ${b.sort_order + 1}`;
+                return (
+                  <tr
+                    key={b.id}
+                    className="border-b border-slate-50 transition last:border-b-0 hover:bg-slate-50/80 dark:border-slate-800/60 dark:hover:bg-slate-900/60"
+                  >
+                    <td className="px-4 py-2 font-mono text-sm font-semibold tabular-nums tracking-tight text-slate-900 dark:text-slate-50">
+                      {label}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-sm tabular-nums text-slate-700 dark:text-slate-200">
+                      <span className="font-semibold">{b.weight_lb}</span>
+                      <span className="ml-1 text-xs font-medium text-slate-400 dark:text-slate-500">
+                        lb
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 font-mono text-sm font-medium tabular-nums text-slate-700 dark:text-slate-200">
+                      {b.length_in} × {b.width_in} × {b.height_in}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
