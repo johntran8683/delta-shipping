@@ -2032,7 +2032,6 @@ export default function DeliveryNoteDetailPage() {
           <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
             <div className="min-w-0 space-y-3">
               <DnShipmentInfoCard detail={detail} />
-              <DnLinesCard detail={detail} />
               {detail.current_status === "PACKING" &&
               detail.active_pack_session ? (
                 <CombinedPackSessionBanner
@@ -2068,6 +2067,7 @@ export default function DeliveryNoteDetailPage() {
                   }
                 />
               ) : null}
+              <DnLinesCard detail={detail} />
             </div>
             <div className="min-w-0 xl:sticky xl:top-4">
               <DnWorkflowRail
