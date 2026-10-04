@@ -183,6 +183,8 @@ model Customer {
   is_active                   Boolean  @default(true)
   /// When true, picker combine-with hints exclude this customer's DNs from clusters.
   dn_combine_hints_disallowed Boolean  @default(false)
+  /// When true, the packer must record per-box contents (customs packing list).
+  requires_box_content        Boolean  @default(false)
   created_at                  DateTime @default(now())
   updated_at                  DateTime @updatedAt
 
@@ -469,8 +471,28 @@ model PackBox {
 
   pack_session PackSession @relation(fields: [pack_session_id], references: [id], onDelete: Cascade)
 
+  items PackBoxItem[]
+
   @@index([pack_session_id, sort_order])
   @@map("pack_boxes")
+}
+
+/// Per-box contents recorded by the packer (customs packing list).
+/// One row per part per box; quantities must balance against the DN lines'
+/// open quantities when contents are required or entered.
+model PackBoxItem {
+  id                   String   @id @default(uuid()) @db.Uuid
+  pack_box_id          String   @db.Uuid
+  sort_order           Int      @default(0)
+  material_code        String?  @db.VarChar(80)
+  material_description String?  @db.Text
+  quantity             Decimal  @db.Decimal(18, 4)
+  created_at           DateTime @default(now())
+
+  pack_box PackBox @relation(fields: [pack_box_id], references: [id], onDelete: Cascade)
+
+  @@index([pack_box_id, sort_order])
+  @@map("pack_box_items")
 }
 
 /// Carrier API credentials for live rate quotes (FedEx / UPS), one row per

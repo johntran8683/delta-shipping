@@ -71,3 +71,17 @@ body {
   outline: 2px solid var(--app-brand);
   outline-offset: 2px;
 }
+
+/* Packing-list printing: when the packing-list modal is open, print only its
+   sheet (rendered in a body-level portal) and hide the rest of the page. */
+@media print {
+  body.packing-list-printing > *:not([data-packing-list-portal]) {
+    display: none !important;
+  }
+  body.packing-list-printing [data-packing-list-portal] {
+    position: static !important;
+  }
+  body.packing-list-printing .packing-list-print-area {
+    color: #0f172a !important;
+  }
+}

@@ -8,7 +8,7 @@ import { ResponseModal } from "@/components/response-modal";
 import { clearSession, getAccessToken, getActiveRoleCode } from "@/lib/auth-storage";
 import { formatApiErrorPayload } from "@/lib/api-error";
 import { apiBase } from "@/lib/config";
-import { canSeeCustomersNav, canWriteCustomers } from "@/lib/import-access";
+import { canSeeCustomersNav, canWriteCustomers, canManageBoxContent } from "@/lib/import-access";
 
 type CarrierAccount = {
   id: string;
@@ -29,6 +29,7 @@ type CustomerDetail = {
   default_email: string | null;
   shipping_preference: string | null;
   is_active: boolean;
+  requires_box_content: boolean;
   ship_to_count: number;
   delivery_note_count: number;
   carrier_accounts: CarrierAccount[];
@@ -49,6 +50,7 @@ export default function CustomerDetailPage() {
   const params = useParams<{ id: string }>();
   const customerId = params.id;
   const canWrite = canWriteCustomers(getActiveRoleCode());
+  const canManageBoxContentFlag = canManageBoxContent(getActiveRoleCode());
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -57,6 +59,9 @@ export default function CustomerDetailPage() {
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [profile, setProfile] = useState(emptyProfile);
   const [savedOk, setSavedOk] = useState(false);
+  /** Per-customer box-content requirement (packing list for customs). */
+  const [boxContent, setBoxContent] = useState(false);
+  const [boxContentSaving, setBoxContentSaving] = useState(false);
   const [newCarrier, setNewCarrier] = useState({
     carrier_code: "FEDEX",
     account_number: "",
@@ -124,6 +129,7 @@ export default function CustomerDetailPage() {
       }
       const d = body as CustomerDetail;
       setDetail(d);
+      setBoxContent(d.requires_box_content === true);
       setProfile({
         sold_to_name: d.sold_to_name ?? "",
         fed_id_number: d.fed_id_number ?? "",
@@ -202,6 +208,36 @@ export default function CustomerDetailPage() {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveBoxContent() {
+    const token = getAccessToken();
+    if (!token || !customerId || !canManageBoxContentFlag) return;
+    setBoxContentSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${apiBase}/customers/${customerId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ requires_box_content: boxContent }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(formatApiErrorPayload(body));
+        return;
+      }
+      const d = body as CustomerDetail;
+      setDetail(d);
+      setBoxContent(d.requires_box_content === true);
+      setSavedOk(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBoxContentSaving(false);
     }
   }
 
@@ -466,6 +502,44 @@ export default function CustomerDetailPage() {
                   </button>
                 ) : null}
               </form>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                Box content (packing list)
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                When on, the packer must record which items are in each box and
+                the quantities must add up to the delivery note lines. Used for
+                customs packing lists.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={boxContent}
+                    disabled={!canManageBoxContentFlag || boxContentSaving}
+                    onChange={(e) => setBoxContent(e.target.checked)}
+                  />
+                  Require box contents when packing
+                </label>
+                {canManageBoxContentFlag ? (
+                  <button
+                    type="button"
+                    disabled={
+                      boxContentSaving || boxContent === (detail?.requires_box_content === true)
+                    }
+                    onClick={() => void saveBoxContent()}
+                    className="rounded-lg bg-[var(--app-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+                  >
+                    {boxContentSaving ? "Saving…" : "Save"}
+                  </button>
+                ) : (
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    {detail?.requires_box_content ? "Required" : "Not required"}
+                  </p>
+                )}
+              </div>
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">

@@ -177,6 +177,7 @@ export const ROLE_PERMISSION_DEFAULTS: Record<string, string[]> = {
     'dn.priority.set',
     'dn.rush.set',
     'customers.read',
+    'customers.write',
   ],
   PICKER: ['dn.read', 'dn.status.pick'],
   PACKER: ['dn.read', 'dn.status.pack'],

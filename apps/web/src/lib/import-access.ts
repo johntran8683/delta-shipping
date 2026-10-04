@@ -24,8 +24,15 @@ export function canSeeCustomersNav(role: string | null | undefined): boolean {
     code === "CSA" ||
     code === "SHIPPER" ||
     code === "SUPERVISOR" ||
+    code === "TEAM_LEAD" ||
     code === "SYSTEM"
   );
+}
+
+/** Who may flip the per-customer "requires box content" toggle. */
+export function canManageBoxContent(role: string | null | undefined): boolean {
+  const code = role?.trim().toUpperCase();
+  return code === "SUPERVISOR" || code === "TEAM_LEAD" || code === "SYSTEM";
 }
 
 export function canWriteCustomers(role: string | null | undefined): boolean {

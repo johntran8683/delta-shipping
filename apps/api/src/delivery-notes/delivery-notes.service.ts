@@ -41,7 +41,7 @@ import {
   DELIVERY_NOTE_STATS_TIMEZONE,
   getVancouverDayBoundsUtc,
 } from './delivery-note-stats';
-import type { CompletePackDto } from './dto/complete-pack.dto';
+import type { CompletePackDto, PackBoxInputDto } from './dto/complete-pack.dto';
 import type { CreateDeliveryNoteDto } from './dto/manual-delivery-note.dto';
 import type { ListDeliveryNotesQueryDto } from './dto/list-delivery-notes.query.dto';
 import type { StartPackDto } from './dto/start-pack.dto';
@@ -696,7 +696,10 @@ export class DeliveryNotesService {
         creator: {
           select: { id: true, email: true, display_name: true },
         },
-        boxes: { orderBy: { sort_order: 'asc' } },
+        boxes: {
+          orderBy: { sort_order: 'asc' },
+          include: { items: { orderBy: { sort_order: 'asc' } } },
+        },
         delivery_notes: {
           include: {
             delivery_note: {
@@ -724,6 +727,13 @@ export class DeliveryNotesService {
         length_in: b.length_in.toString(),
         width_in: b.width_in.toString(),
         height_in: b.height_in.toString(),
+        items: b.items.map((it) => ({
+          id: it.id,
+          sort_order: it.sort_order,
+          material_code: it.material_code,
+          material_description: it.material_description,
+          quantity: it.quantity.toString(),
+        })),
       })),
     }));
   }
@@ -854,6 +864,226 @@ export class DeliveryNotesService {
     return this.findOne(anchorId, payload);
   }
 
+  private normalizeBoxPartKey(code: string | null | undefined): string {
+    return (code ?? '').trim().toUpperCase();
+  }
+
+  /**
+   * Validate per-box contents against the member DN lines' open quantities.
+   * Returns normalized item rows per box (aligned with `boxes` order), or
+   * null when contents are neither required nor entered.
+   *
+   * Contents are required when any member note's customer requires box
+   * contents. Whenever contents are required — or any are entered — every
+   * box must list its contents, every part must exist on the packed notes,
+   * and each part's assigned quantity must equal its total open quantity.
+   */
+  private async validateBoxContents(
+    tx: Prisma.TransactionClient,
+    memberIds: string[],
+    boxes: PackBoxInputDto[],
+  ): Promise<Array<
+    Array<{
+      material_code: string | null;
+      material_description: string | null;
+      quantity: Prisma.Decimal;
+    }>
+  > | null> {
+    const members = await tx.deliveryNote.findMany({
+      where: { id: { in: memberIds } },
+      select: {
+        id: true,
+        customer: { select: { requires_box_content: true } },
+        lines: {
+          select: {
+            material_code: true,
+            material_description: true,
+            open_qty: true,
+          },
+        },
+      },
+    });
+    const required = members.some(
+      (m) => m.customer?.requires_box_content === true,
+    );
+    const entered = boxes.some((b) => (b.contents?.length ?? 0) > 0);
+    if (!required && !entered) return null;
+
+    // Total open quantity per part across the whole pack session.
+    const requiredQty = new Map<
+      string,
+      { qty: Prisma.Decimal; displayCode: string }
+    >();
+    for (const m of members) {
+      for (const line of m.lines) {
+        const qty =
+          line.open_qty == null
+            ? new Prisma.Decimal(0)
+            : new Prisma.Decimal(line.open_qty);
+        if (qty.lte(0)) continue;
+        const key = this.normalizeBoxPartKey(line.material_code);
+        const cur = requiredQty.get(key);
+        if (cur) {
+          cur.qty = cur.qty.add(qty);
+        } else {
+          requiredQty.set(key, {
+            qty,
+            displayCode: (line.material_code ?? '').trim() || '(no part #)',
+          });
+        }
+      }
+    }
+
+    const assignedQty = new Map<string, Prisma.Decimal>();
+    const normalized: Array<
+      Array<{
+        material_code: string | null;
+        material_description: string | null;
+        quantity: Prisma.Decimal;
+      }>
+    > = [];
+    boxes.forEach((box, boxIdx) => {
+      const contents = box.contents ?? [];
+      const boxLabel = `Box ${boxIdx + 1}`;
+      if (required && contents.length === 0) {
+        throw new BadRequestException(
+          `${boxLabel}: enter which items are in this box (required for this customer).`,
+        );
+      }
+      const rows: Array<{
+        material_code: string | null;
+        material_description: string | null;
+        quantity: Prisma.Decimal;
+      }> = [];
+      contents.forEach((c, lineIdx) => {
+        const code = (c.materialCode ?? '').trim();
+        const key = this.normalizeBoxPartKey(code);
+        if (!key) {
+          throw new BadRequestException(
+            `${boxLabel}, line ${lineIdx + 1}: part number is required.`,
+          );
+        }
+        if (!requiredQty.has(key)) {
+          throw new BadRequestException(
+            `${boxLabel}: part "${code}" is not on these delivery notes.`,
+          );
+        }
+        const qty = new Prisma.Decimal(c.quantity);
+        assignedQty.set(
+          key,
+          (assignedQty.get(key) ?? new Prisma.Decimal(0)).add(qty),
+        );
+        rows.push({
+          material_code: code || null,
+          material_description: c.materialDescription?.trim() || null,
+          quantity: qty,
+        });
+      });
+      normalized.push(rows);
+    });
+
+    for (const [key, req] of requiredQty) {
+      const got = assignedQty.get(key) ?? new Prisma.Decimal(0);
+      if (!got.equals(req.qty)) {
+        throw new BadRequestException(
+          `Part "${req.displayCode}": ${got.toString()} of ${req.qty.toString()} assigned to boxes. Assign every unit to a box.`,
+        );
+      }
+    }
+    return normalized;
+  }
+
+  /**
+   * Parts available for box-content entry in the open pack session, with
+   * open quantities summed per part, plus whether any member note's
+   * customer requires box contents.
+   */
+  async getPackParts(anchorId: string) {
+    const membership = await this.prisma.packSessionDeliveryNote.findFirst({
+      where: {
+        delivery_note_id: anchorId,
+        pack_session: { completed_at: null },
+      },
+      include: {
+        pack_session: {
+          include: {
+            delivery_notes: {
+              select: { delivery_note_id: true },
+            },
+          },
+        },
+      },
+    });
+    if (!membership) {
+      throw new BadRequestException(
+        'No open pack session for this delivery note. Start packing first.',
+      );
+    }
+    const memberIds = membership.pack_session.delivery_notes.map(
+      (d) => d.delivery_note_id,
+    );
+    const members = await this.prisma.deliveryNote.findMany({
+      where: { id: { in: memberIds } },
+      select: {
+        id: true,
+        customer: { select: { requires_box_content: true } },
+        lines: {
+          select: {
+            material_code: true,
+            material_description: true,
+            open_qty: true,
+          },
+        },
+      },
+    });
+    const box_content_required = members.some(
+      (m) => m.customer?.requires_box_content === true,
+    );
+    const byPart = new Map<
+      string,
+      {
+        material_code: string | null;
+        material_description: string | null;
+        open_qty: Prisma.Decimal;
+      }
+    >();
+    for (const m of members) {
+      for (const line of m.lines) {
+        const qty =
+          line.open_qty == null
+            ? new Prisma.Decimal(0)
+            : new Prisma.Decimal(line.open_qty);
+        if (qty.lte(0)) continue;
+        const key = this.normalizeBoxPartKey(line.material_code);
+        const cur = byPart.get(key);
+        if (cur) {
+          cur.open_qty = cur.open_qty.add(qty);
+          if (!cur.material_description && line.material_description) {
+            cur.material_description = line.material_description;
+          }
+        } else {
+          byPart.set(key, {
+            material_code: (line.material_code ?? '').trim() || null,
+            material_description: line.material_description,
+            open_qty: qty,
+          });
+        }
+      }
+    }
+    return {
+      box_content_required,
+      parts: [...byPart.values()]
+        .map((p) => ({
+          material_code: p.material_code,
+          material_description: p.material_description,
+          open_qty: p.open_qty.toString(),
+        }))
+        .sort((a, b) =>
+          (a.material_code ?? '').localeCompare(b.material_code ?? ''),
+        ),
+    };
+  }
+
   async completePacking(
     anchorId: string,
     dto: CompletePackDto,
@@ -894,6 +1124,12 @@ export class DeliveryNotesService {
         }
       }
 
+      const contentsPerBox = await this.validateBoxContents(
+        tx,
+        memberIds,
+        dto.boxes,
+      );
+
       const boxRows = dto.boxes.map((b, idx) => ({
         id: randomUUID(),
         pack_session_id: session.id,
@@ -905,6 +1141,22 @@ export class DeliveryNotesService {
         height_in: new Prisma.Decimal(b.heightIn),
       }));
       await tx.packBox.createMany({ data: boxRows });
+
+      if (contentsPerBox) {
+        const itemRows = boxRows.flatMap((boxRow, idx) =>
+          (contentsPerBox[idx] ?? []).map((item, itemIdx) => ({
+            id: randomUUID(),
+            pack_box_id: boxRow.id,
+            sort_order: itemIdx,
+            material_code: item.material_code,
+            material_description: item.material_description,
+            quantity: item.quantity,
+          })),
+        );
+        if (itemRows.length > 0) {
+          await tx.packBoxItem.createMany({ data: itemRows });
+        }
+      }
 
       const trimmedNote = dto.packCompletionNote?.trim();
       await tx.packSession.update({
@@ -946,6 +1198,13 @@ export class DeliveryNotesService {
       }
       await this.assertDnsStatuses(tx, session.memberIds, dn_status.PACKED);
 
+      // Validate before deleting: a failed edit must not wipe the existing pack.
+      const contentsPerBox = await this.validateBoxContents(
+        tx,
+        session.memberIds,
+        dto.boxes,
+      );
+
       await tx.packBox.deleteMany({ where: { pack_session_id: session.id } });
 
       const boxRows = dto.boxes.map((b, idx) => ({
@@ -959,6 +1218,22 @@ export class DeliveryNotesService {
         height_in: new Prisma.Decimal(b.heightIn),
       }));
       await tx.packBox.createMany({ data: boxRows });
+
+      if (contentsPerBox) {
+        const itemRows = boxRows.flatMap((boxRow, idx) =>
+          (contentsPerBox[idx] ?? []).map((item, itemIdx) => ({
+            id: randomUUID(),
+            pack_box_id: boxRow.id,
+            sort_order: itemIdx,
+            material_code: item.material_code,
+            material_description: item.material_description,
+            quantity: item.quantity,
+          })),
+        );
+        if (itemRows.length > 0) {
+          await tx.packBoxItem.createMany({ data: itemRows });
+        }
+      }
 
       const trimmedNote = dto.packCompletionNote?.trim();
       await tx.packSession.update({

@@ -145,6 +145,7 @@ export class CustomersService {
       shipping_preference: customer.shipping_preference,
       is_active: customer.is_active,
       dn_combine_hints_disallowed: customer.dn_combine_hints_disallowed,
+      requires_box_content: customer.requires_box_content,
       created_at: customer.created_at,
       updated_at: customer.updated_at,
       ship_to_count: customer._count.ship_to_locations,
@@ -198,6 +199,9 @@ export class CustomersService {
     }
     if (dto.is_active !== undefined) {
       data.is_active = dto.is_active;
+    }
+    if (dto.requires_box_content !== undefined) {
+      data.requires_box_content = dto.requires_box_content;
     }
 
     await this.prisma.customer.update({ where: { id }, data });

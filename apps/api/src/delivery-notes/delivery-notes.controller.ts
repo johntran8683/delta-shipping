@@ -185,6 +185,12 @@ export class DeliveryNotesController {
     return this.deliveryNotes.updateCompletedPacking(id, dto, payload);
   }
 
+  @Get(':id/pack/parts')
+  @RequirePermissions('dn.status.pack')
+  getPackParts(@Param('id', ParseUUIDPipe) id: string) {
+    return this.deliveryNotes.getPackParts(id);
+  }
+
   @Get(':id/ship-group-options')
   @RequirePermissions('dn.read')
   shipGroupOptions(@Param('id', ParseUUIDPipe) id: string) {

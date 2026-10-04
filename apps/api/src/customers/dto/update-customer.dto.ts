@@ -33,4 +33,8 @@ export class UpdateCustomerDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_box_content?: boolean;
 }

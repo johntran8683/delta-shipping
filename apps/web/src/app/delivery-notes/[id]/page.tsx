@@ -73,6 +73,13 @@ type CompletedPackSession = {
     length_in: string;
     width_in: string;
     height_in: string;
+    items: {
+      id: string;
+      sort_order: number;
+      material_code: string | null;
+      material_description: string | null;
+      quantity: string;
+    }[];
   }[];
 };
 
@@ -638,6 +645,7 @@ function RecordedBoxesCard({
                 <th className="px-4 py-2">Box</th>
                 <th className="px-3 py-2">Weight</th>
                 <th className="px-4 py-2">L × W × H (in)</th>
+                <th className="px-4 py-2">Contents</th>
               </tr>
             </thead>
             <tbody>
@@ -661,6 +669,31 @@ function RecordedBoxesCard({
                     <td className="px-4 py-2 font-mono text-sm font-medium tabular-nums text-slate-700 dark:text-slate-200">
                       {b.length_in} × {b.width_in} × {b.height_in}
                     </td>
+                    <td className="px-4 py-2 text-sm text-slate-700 dark:text-slate-200">
+                      {(b.items ?? []).length > 0 ? (
+                        <ul className="m-0 list-none space-y-1 p-0">
+                          {(b.items ?? []).map((it) => (
+                            <li key={it.id} className="leading-snug">
+                              <span className="font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                                {it.material_code?.trim() || "(no part #)"}
+                              </span>{" "}
+                              <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300">
+                                × {it.quantity}
+                              </span>
+                              {it.material_description?.trim() ? (
+                                <span className="block text-xs text-slate-500 dark:text-slate-400">
+                                  {it.material_description.trim()}
+                                </span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="text-xs text-slate-400 dark:text-slate-500">
+                          —
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -672,6 +705,173 @@ function RecordedBoxesCard({
   );
 }
 
+/** Printable packing list for a completed pack session (browser print). */
+function PackingListModal({
+  session,
+  dnNumbers,
+  customerName,
+  shipToName,
+  onClose,
+}: {
+  session: CompletedPackSession;
+  dnNumbers: string[];
+  customerName: string;
+  shipToName: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    document.body.classList.add("packing-list-printing");
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.classList.remove("packing-list-printing");
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const boxes = [...(session.boxes ?? [])].sort(
+    (a, b) => a.sort_order - b.sort_order,
+  );
+  const packedAt = session.completed_at ? new Date(session.completed_at) : null;
+  const packedLabel =
+    packedAt && !Number.isNaN(packedAt.getTime())
+      ? packedAt.toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : "—";
+
+  return createPortal(
+    <div data-packing-list-portal className="fixed inset-0 z-[90]">
+      <div
+        className="absolute inset-0 bg-slate-950/50 print:hidden"
+        onClick={onClose}
+        aria-hidden
+      />
+      <div className="absolute inset-0 overflow-y-auto p-4 sm:p-8 print:static print:overflow-visible print:p-0">
+        <div className="packing-list-print-area mx-auto max-w-3xl rounded-xl bg-white p-6 text-slate-900 shadow-xl sm:p-8 print:m-0 print:max-w-none print:rounded-none print:p-0 print:shadow-none">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight">Packing list</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {dnNumbers.join(" · ")}
+              </p>
+            </div>
+            <div className="flex gap-2 print:hidden">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+              >
+                Print
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+
+          <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 border-y border-slate-200 py-3 text-sm sm:grid-cols-4">
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Customer
+              </dt>
+              <dd className="mt-0.5 font-medium">{customerName || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Ship to
+              </dt>
+              <dd className="mt-0.5 font-medium">{shipToName || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Packed
+              </dt>
+              <dd className="mt-0.5 font-medium">{packedLabel}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Boxes
+              </dt>
+              <dd className="mt-0.5 font-medium tabular-nums">{boxes.length}</dd>
+            </div>
+          </dl>
+
+          <div className="mt-5 space-y-6">
+            {boxes.map((b, bi) => {
+              const bn = b.box_number?.trim();
+              const label = bn ? `Box ${bn}` : `Box ${bi + 1}`;
+              const items = [...(b.items ?? [])].sort(
+                (x, y) => x.sort_order - y.sort_order,
+              );
+              return (
+                <section key={b.id} className="break-inside-avoid">
+                  <h3 className="text-sm font-bold">
+                    {label}
+                    <span className="ml-2 font-mono text-xs font-medium tabular-nums text-slate-600">
+                      {b.length_in} × {b.width_in} × {b.height_in} in ·{" "}
+                      {b.weight_lb} lb
+                    </span>
+                  </h3>
+                  <table className="mt-2 w-full border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-300 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        <th className="py-1.5 pr-3">Part #</th>
+                        <th className="py-1.5 pr-3">Description</th>
+                        <th className="py-1.5 text-right tabular-nums">Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.length > 0 ? (
+                        items.map((it) => (
+                          <tr
+                            key={it.id}
+                            className="border-b border-slate-100 last:border-b-0"
+                          >
+                            <td className="py-1.5 pr-3 font-mono font-semibold tabular-nums">
+                              {it.material_code?.trim() || "(no part #)"}
+                            </td>
+                            <td className="py-1.5 pr-3 text-slate-700">
+                              {it.material_description?.trim() || "—"}
+                            </td>
+                            <td className="py-1.5 text-right font-mono tabular-nums">
+                              {it.quantity}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            colSpan={3}
+                            className="py-1.5 text-sm italic text-slate-400"
+                          >
+                            No contents recorded for this box.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </section>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function CompletedPackResultBanner({
   session,
   currentDnId,
@@ -680,6 +880,7 @@ function CompletedPackResultBanner({
   onEdit,
   readOnly,
   rateEstimator,
+  onPackingList,
 }: {
   session: CompletedPackSession;
   currentDnId: string;
@@ -690,6 +891,8 @@ function CompletedPackResultBanner({
   readOnly?: boolean;
   /** Rate-estimate controls rendered beside the package summary. */
   rateEstimator?: ReactNode;
+  /** Opens the printable packing list for this session. */
+  onPackingList?: () => void;
 }) {
   const notes = session.delivery_notes;
   const boxes = session.boxes ?? [];
@@ -737,6 +940,29 @@ function CompletedPackResultBanner({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {onPackingList && boxes.length > 0 ? (
+            <button
+              type="button"
+              onClick={onPackingList}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-200/90 bg-white px-2.5 text-[11px] font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-slate-100"
+              title="View and print the packing list"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                className="size-3.5"
+                aria-hidden
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M6 2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H6Zm1 2a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H7Zm-1 5a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H7a1 1 0 0 1-1-1Zm1 3a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2H7Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              Packing list
+            </button>
+          ) : null}
           {editable && onEdit ? (
             <button
               type="button"
@@ -1027,12 +1253,26 @@ function canEditPackResult(): boolean {
 
 /** True once the note has left the warehouse pack lane for outbound shipping. */
 
+type BoxContentRowState = {
+  materialCode: string;
+  quantity: string;
+};
+
 type BoxRowState = {
   boxNumber: string;
   weightLb: string;
   lengthIn: string;
   widthIn: string;
   heightIn: string;
+  /** Per-box contents entered by the packer (customs packing list). */
+  contents: BoxContentRowState[];
+  contentsOpen: boolean;
+};
+
+type ValidatedBoxContent = {
+  materialCode: string;
+  materialDescription?: string;
+  quantity: number;
 };
 
 type ValidatedBox = {
@@ -1041,7 +1281,72 @@ type ValidatedBox = {
   lengthIn: number;
   widthIn: number;
   heightIn: number;
+  contents: ValidatedBoxContent[];
 };
+
+/** One part available for box-content entry, open qty summed per part. */
+type PackPart = {
+  material_code: string | null;
+  material_description: string | null;
+  open_qty: string;
+};
+
+type PackPartsInfo = {
+  box_content_required: boolean;
+  parts: PackPart[];
+};
+
+/** Normalize a part code for comparison (case/whitespace-insensitive). */
+function normalizePartKey(code: string | null | undefined): string {
+  return (code ?? "").trim().toUpperCase();
+}
+
+/** Exact decimal-string comparison avoiding float rounding (e.g. 0.1+0.2). */
+function decimalStringsEqual(a: string, b: string): boolean {
+  const norm = (s: string): string => {
+    let t = s.trim();
+    let neg = "";
+    if (t.startsWith("-") || t.startsWith("+")) {
+      if (t.startsWith("-")) neg = "-";
+      t = t.slice(1);
+    }
+    const [i = "0", f = ""] = t.split(".");
+    const int = i.replace(/^0+(?=\d)/, "") || "0";
+    const frac = f.replace(/0+$/, "");
+    const zero = int === "0" && frac === "";
+    return `${zero ? "" : neg}${int}${frac ? `.${frac}` : ""}`;
+  };
+  return norm(a) === norm(b);
+}
+
+/** Exact decimal-string addition (avoids float rounding when summing quantities). */
+function addDecimalStrings(a: string, b: string): string {
+  const parse = (s: string): { neg: boolean; int: string; frac: string } => {
+    let t = s.trim();
+    let neg = false;
+    if (t.startsWith("-") || t.startsWith("+")) {
+      neg = t.startsWith("-");
+      t = t.slice(1);
+    }
+    const [i = "0", f = ""] = t.split(".");
+    return { neg, int: i || "0", frac: f };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  const scale = Math.max(pa.frac.length, pb.frac.length);
+  const toScaled = (p: { neg: boolean; int: string; frac: string }): bigint => {
+    const digits = `${p.int}${p.frac.padEnd(scale, "0")}`.replace(/^0+(?=\d)/, "") || "0";
+    const v = BigInt(digits);
+    return p.neg ? -v : v;
+  };
+  const sum = toScaled(pa) + toScaled(pb);
+  const neg = sum < BigInt(0);
+  const abs = (neg ? -sum : sum).toString().padStart(scale + 1, "0");
+  const int = (scale > 0 ? abs.slice(0, -scale) : abs).replace(/^0+(?=\d)/, "") || "0";
+  const frac = scale > 0 ? abs.slice(-scale).replace(/0+$/, "") : "";
+  const zero = int === "0" && frac === "";
+  return `${zero || !neg ? "" : "-"}${int}${frac ? `.${frac}` : ""}`;
+}
 
 const emptyBoxRow = (): BoxRowState => ({
   boxNumber: "",
@@ -1049,6 +1354,8 @@ const emptyBoxRow = (): BoxRowState => ({
   lengthIn: "",
   widthIn: "",
   heightIn: "",
+  contents: [],
+  contentsOpen: false,
 });
 
 /** Next whole-number box label after the highest numeric `boxNumber` in rows. */
@@ -1074,20 +1381,31 @@ function boxRowsFromCompletedSession(
   if (boxes.length === 0) return initialMarkPackedBoxRows();
   return [...boxes]
     .sort((a, b) => a.sort_order - b.sort_order)
-    .map((b) => ({
-      boxNumber: b.box_number?.trim() || String(b.sort_order + 1),
-      weightLb: b.weight_lb,
-      lengthIn: b.length_in,
-      widthIn: b.width_in,
-      heightIn: b.height_in,
-    }));
+    .map((b) => {
+      const contents: BoxContentRowState[] = [...(b.items ?? [])]
+        .sort((x, y) => x.sort_order - y.sort_order)
+        .map((it) => ({
+          materialCode: it.material_code?.trim() || "",
+          quantity: it.quantity,
+        }));
+      return {
+        boxNumber: b.box_number?.trim() || String(b.sort_order + 1),
+        weightLb: b.weight_lb,
+        lengthIn: b.length_in,
+        widthIn: b.width_in,
+        heightIn: b.height_in,
+        contents,
+        contentsOpen: contents.length > 0,
+      };
+    });
 }
 
 type PackBoxesModalMode = "complete" | "edit";
 
-function buildValidatedBoxes(rows: BoxRowState[]):
-  | { ok: true; boxes: ValidatedBox[] }
-  | { ok: false; error: string } {
+function buildValidatedBoxes(
+  rows: BoxRowState[],
+  partsInfo: PackPartsInfo | null,
+): { ok: true; boxes: ValidatedBox[] } | { ok: false; error: string } {
   const boxes: ValidatedBox[] = [];
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
@@ -1097,6 +1415,7 @@ function buildValidatedBoxes(rows: BoxRowState[]):
       lengthIn: Number(row.lengthIn),
       widthIn: Number(row.widthIn),
       heightIn: Number(row.heightIn),
+      contents: [],
     };
     if (
       !Number.isFinite(b.weightLb) ||
@@ -1115,9 +1434,250 @@ function buildValidatedBoxes(rows: BoxRowState[]):
     }
     boxes.push(b);
   }
+  const contentsResult = validateBoxContentsClient(rows, partsInfo);
+  if (!contentsResult.ok) return contentsResult;
+  contentsResult.contents.forEach((contents, i) => {
+    boxes[i]!.contents = contents;
+  });
   return { ok: true, boxes };
 }
 
+/**
+ * Client-side mirror of the server's strict box-content rule: contents are
+ * required when the customer requires them; whenever any contents are
+ * entered, every box must list its contents and each part's assigned
+ * quantity must equal its total open quantity.
+ */
+function validateBoxContentsClient(
+  rows: BoxRowState[],
+  partsInfo: PackPartsInfo | null,
+): { ok: true; contents: ValidatedBoxContent[][] } | { ok: false; error: string } {
+  const empty: ValidatedBoxContent[][] = rows.map(() => []);
+  const required = partsInfo?.box_content_required ?? false;
+  const entered = rows.some((r) => r.contents.length > 0);
+  if (!required && !entered) return { ok: true, contents: empty };
+  if (!partsInfo || partsInfo.parts.length === 0) {
+    return {
+      ok: false,
+      error: "Could not load the delivery note lines for contents entry. Try again.",
+    };
+  }
+
+  const partByKey = new Map<
+    string,
+    { openQty: string; description: string | null; displayCode: string }
+  >();
+  for (const p of partsInfo.parts) {
+    const key = normalizePartKey(p.material_code);
+    if (partByKey.has(key)) continue;
+    partByKey.set(key, {
+      openQty: p.open_qty,
+      description: p.material_description,
+      displayCode: (p.material_code ?? "").trim() || "(no part #)",
+    });
+  }
+
+  const assigned = new Map<string, string>();
+  const contents: ValidatedBoxContent[][] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    const boxLabel = `Box ${i + 1}`;
+    if (required && row.contents.length === 0) {
+      return {
+        ok: false,
+        error: `${boxLabel}: enter which items are in this box (required for this customer).`,
+      };
+    }
+    const boxContents: ValidatedBoxContent[] = [];
+    for (let j = 0; j < row.contents.length; j++) {
+      const c = row.contents[j]!;
+      const rawCode = c.materialCode.trim();
+      const code = rawCode === "__select__" ? "" : rawCode;
+      const key = normalizePartKey(code);
+      const part = partByKey.get(key);
+      if (!part) {
+        return {
+          ok: false,
+          error:
+            key === ""
+              ? `${boxLabel}, item ${j + 1}: choose a part.`
+              : `${boxLabel}: part "${code}" is not on these delivery notes.`,
+        };
+      }
+      const qty = Number(c.quantity);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return {
+          ok: false,
+          error: `${boxLabel}, item ${j + 1}: enter a quantity greater than 0.`,
+        };
+      }
+      assigned.set(key, addDecimalStrings(assigned.get(key) ?? "0", c.quantity.trim()));
+      boxContents.push({
+        materialCode: code,
+        materialDescription: part.description ?? undefined,
+        quantity: qty,
+      });
+    }
+    contents.push(boxContents);
+  }
+
+  for (const [key, part] of partByKey) {
+    const got = assigned.get(key) ?? "0";
+    if (!decimalStringsEqual(got, part.openQty)) {
+      return {
+        ok: false,
+        error: `Part "${part.displayCode}": ${got} of ${part.openQty} assigned to boxes. Assign every unit to a box.`,
+      };
+    }
+  }
+  return { ok: true, contents };
+}
+
+/** Per-box contents editor used in the pack dialog (complete + edit modes). */
+function BoxContentsEditor({
+  boxIndex,
+  row,
+  parts,
+  assignedByKey,
+  required,
+  busy,
+  inputClassName,
+  onChange,
+}: {
+  boxIndex: number;
+  row: BoxRowState;
+  parts: PackPart[];
+  assignedByKey: Map<string, string>;
+  required: boolean;
+  busy: boolean;
+  inputClassName: string;
+  onChange: (next: BoxRowState) => void;
+}) {
+  const boxLabel = `Box ${boxIndex + 1}`;
+  const setContents = (contents: BoxContentRowState[]) =>
+    onChange({ ...row, contents });
+  return (
+    <div className="mt-2 border-t border-slate-200/80 pt-2 sm:col-span-6 dark:border-slate-700/60">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onChange({ ...row, contentsOpen: !row.contentsOpen })}
+        className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 uppercase tracking-wide hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
+        aria-expanded={row.contentsOpen}
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          aria-hidden
+          className={`size-3 transition-transform ${row.contentsOpen ? "rotate-90" : ""}`}
+        >
+          <path
+            fillRule="evenodd"
+            d="M7.21 14.77a.75.75 0 0 1-.02-1.06L11.168 10 7.199 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z"
+            clipRule="evenodd"
+          />
+        </svg>
+        Contents ({row.contents.length})
+        {required ? (
+          <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold normal-case tracking-normal text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+            Required
+          </span>
+        ) : null}
+      </button>
+      {row.contentsOpen ? (
+        <div className="mt-2 space-y-2">
+          {parts.length === 0 ? (
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Loading parts…
+            </p>
+          ) : (
+            <>
+              {row.contents.map((c, ci) => (
+                <div key={ci} className="flex items-center gap-2">
+                  <select
+                    value={c.materialCode}
+                    disabled={busy}
+                    aria-label={`${boxLabel} item ${ci + 1} part`}
+                    onChange={(e) =>
+                      setContents(
+                        row.contents.map((x, i) =>
+                          i === ci ? { ...x, materialCode: e.target.value } : x,
+                        ),
+                      )
+                    }
+                    className={`min-w-0 flex-1 ${inputClassName}`}
+                  >
+                    <option value="__select__">Select part…</option>
+                    {parts.map((p, pi) => {
+                      const value = (p.material_code ?? "").trim();
+                      const key = normalizePartKey(p.material_code);
+                      const assigned = assignedByKey.get(key) ?? "0";
+                      const label = `${value || "(no part #)"} · ${assigned}/${p.open_qty} assigned`;
+                      return (
+                        <option
+                          key={`${value}-${pi}`}
+                          value={value}
+                          disabled={
+                            c.materialCode !== value &&
+                            decimalStringsEqual(assigned, p.open_qty)
+                          }
+                        >
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <input
+                    type="number"
+                    step="any"
+                    min={0}
+                    placeholder="Qty"
+                    aria-label={`${boxLabel} item ${ci + 1} quantity`}
+                    value={c.quantity}
+                    disabled={busy}
+                    onChange={(e) =>
+                      setContents(
+                        row.contents.map((x, i) =>
+                          i === ci ? { ...x, quantity: e.target.value } : x,
+                        ),
+                      )
+                    }
+                    className={`w-24 shrink-0 ${inputClassName} tabular-nums`}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-label={`Remove ${boxLabel} item ${ci + 1}`}
+                    onClick={() =>
+                      setContents(row.contents.filter((_, i) => i !== ci))
+                    }
+                    className="shrink-0 text-[11px] font-medium text-slate-500 underline-offset-2 hover:text-red-700 hover:underline dark:hover:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  setContents([
+                    ...row.contents,
+                    { materialCode: "__select__", quantity: "" },
+                  ])
+                }
+                className="text-[11px] font-medium text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline dark:text-slate-300 dark:hover:text-slate-100"
+              >
+                + Add item
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export default function DeliveryNoteDetailPage() {
   const params = useParams();
@@ -1158,6 +1718,24 @@ export default function DeliveryNoteDetailPage() {
   const [modalBoxRows, setModalBoxRows] = useState<BoxRowState[]>(() =>
     initialMarkPackedBoxRows(),
   );
+  /** Parts + contents-required flag for the open pack dialog (complete/edit). */
+  const [packParts, setPackParts] = useState<PackPartsInfo | null>(null);
+  /** Packing-list print modal. */
+  const [packingListOpen, setPackingListOpen] = useState(false);
+  /** Assigned quantity per normalized part across the dialog's box rows. */
+  const packPartsAssignedByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of modalBoxRows) {
+      for (const c of r.contents) {
+        const key = normalizePartKey(c.materialCode);
+        if (!key || key === "__SELECT__") continue;
+        const q = Number(c.quantity);
+        if (!Number.isFinite(q) || q <= 0) continue;
+        m.set(key, addDecimalStrings(m.get(key) ?? "0", c.quantity.trim()));
+      }
+    }
+    return m;
+  }, [modalBoxRows]);
   const [updateStatusSaveError, setUpdateStatusSaveError] = useState<
     string | null
   >(null);
@@ -1689,6 +2267,26 @@ export default function DeliveryNoteDetailPage() {
     setStartPackingSaveError(null);
   }
 
+  /** Load the pack session's parts for box-content entry; null on failure. */
+  async function loadPackParts(): Promise<PackPartsInfo | null> {
+    const token = getAccessToken();
+    if (!token) return null;
+    try {
+      const res = await fetch(`${apiBase}/delivery-notes/${id}/pack/parts`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as PackPartsInfo;
+      if (!Array.isArray(data?.parts)) return null;
+      return {
+        box_content_required: data.box_content_required === true,
+        parts: data.parts,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   function openUpdateStatusModal() {
     if (!detail) return;
     if (detail.current_status === "PICKED") {
@@ -1702,7 +2300,17 @@ export default function DeliveryNoteDetailPage() {
       `Packed cart ${detail.current_priority_no ?? 1}`,
     );
     setUpdateStatusSaveError(null);
+    setPackParts(null);
     setUpdateStatusOpen(true);
+    void loadPackParts().then((info) => {
+      setPackParts(info);
+      if (info?.box_content_required) {
+        // Contents are mandatory: expand every box's editor up front.
+        setModalBoxRows((rows) =>
+          rows.map((r) => ({ ...r, contentsOpen: true })),
+        );
+      }
+    });
   }
 
   function openEditPackResultModal() {
@@ -1714,12 +2322,22 @@ export default function DeliveryNoteDetailPage() {
     setModalBoxRows(boxRowsFromCompletedSession(session.boxes ?? []));
     setModalPackCompletionNote(session.pack_completion_note?.trim() ?? "");
     setUpdateStatusSaveError(null);
+    setPackParts(null);
     setUpdateStatusOpen(true);
+    void loadPackParts().then((info) => {
+      setPackParts(info);
+      if (info?.box_content_required) {
+        setModalBoxRows((rows) =>
+          rows.map((r) => ({ ...r, contentsOpen: true })),
+        );
+      }
+    });
   }
 
   function closeUpdateStatusModal() {
     setUpdateStatusOpen(false);
     setUpdateStatusSaveError(null);
+    setPackParts(null);
     setPackBoxesModalMode("complete");
   }
 
@@ -1843,7 +2461,7 @@ export default function DeliveryNoteDetailPage() {
       return;
     }
 
-    const built = buildValidatedBoxes(modalBoxRows);
+    const built = buildValidatedBoxes(modalBoxRows, packParts);
     if (!built.ok) {
       setUpdateStatusSaveError(built.error);
       return;
@@ -2066,6 +2684,7 @@ export default function DeliveryNoteDetailPage() {
                       : undefined
                   }
                   readOnly={detail.current_status === "SHIPPING_IN_PROGRESS"}
+                  onPackingList={() => setPackingListOpen(true)}
                   rateEstimator={
                     detail.current_status === "SHIPPING_IN_PROGRESS" ? (
                       <RateQuoteEstimator
@@ -2505,6 +3124,49 @@ export default function DeliveryNoteDetailPage() {
                     <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Boxes
                     </p>
+                    {packParts && packParts.parts.length > 0 ? (
+                      <div
+                        className="rounded-lg border border-slate-200/90 bg-white px-3 py-2 text-xs dark:border-slate-700/70 dark:bg-slate-950/40"
+                        aria-live="polite"
+                      >
+                        <span className="font-semibold text-slate-600 uppercase tracking-wide dark:text-slate-300">
+                          Contents{" "}
+                          {packParts.box_content_required ? (
+                            <span className="text-amber-700 dark:text-amber-300">
+                              (required)
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">(optional)</span>
+                          )}
+                          {" · "}
+                        </span>
+                        {packParts.parts.map((p, pi) => {
+                          const key = normalizePartKey(p.material_code);
+                          const assigned = packPartsAssignedByKey.get(key) ?? "0";
+                          const done = decimalStringsEqual(assigned, p.open_qty);
+                          const label = (p.material_code ?? "").trim() || "(no part #)";
+                          return (
+                            <span key={`${label}-${pi}`}>
+                              {pi > 0 ? (
+                                <span className="mx-1.5 text-slate-300 dark:text-slate-600" aria-hidden>
+                                  ·
+                                </span>
+                              ) : null}
+                              <span
+                                className={
+                                  done
+                                    ? "font-medium text-emerald-700 dark:text-emerald-300"
+                                    : "font-medium text-slate-700 dark:text-slate-200"
+                                }
+                              >
+                                {label}: {assigned}/{p.open_qty}
+                                {done ? " ✓" : ""}
+                              </span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                     <div className="space-y-3">
                       {modalBoxRows.map((row, idx) => (
                           <div
@@ -2610,6 +3272,20 @@ export default function DeliveryNoteDetailPage() {
                                 </button>
                               ) : null}
                             </div>
+                            <BoxContentsEditor
+                              boxIndex={idx}
+                              row={row}
+                              parts={packParts?.parts ?? []}
+                              assignedByKey={packPartsAssignedByKey}
+                              required={packParts?.box_content_required ?? false}
+                              busy={busy}
+                              inputClassName={inputSm}
+                              onChange={(next) =>
+                                setModalBoxRows((rows) =>
+                                  rows.map((r, i) => (i === idx ? next : r)),
+                                )
+                              }
+                            />
                           </div>
                         ))}
                       </div>
@@ -3012,6 +3688,18 @@ export default function DeliveryNoteDetailPage() {
         message={error ?? ""}
         variant="error"
       />
+
+      {portalMounted && packingListOpen && detail?.completed_pack_sessions?.[0] ? (
+        <PackingListModal
+          session={detail.completed_pack_sessions[0]}
+          dnNumbers={detail.completed_pack_sessions[0].delivery_notes.map(
+            (n) => n.dn_number,
+          )}
+          customerName={detail.sold_to_name}
+          shipToName={detail.ship_to_name}
+          onClose={() => setPackingListOpen(false)}
+        />
+      ) : null}
     </OperationsShell>
   );
 }
