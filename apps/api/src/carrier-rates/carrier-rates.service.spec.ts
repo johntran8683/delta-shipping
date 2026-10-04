@@ -206,6 +206,10 @@ describe('CarrierRatesService', () => {
 
     expect(result.quotes).toHaveLength(1);
     expect(bodies.some((b) => b.includes('"countryCode":"US"'))).toBe(true);
+    // FedEx requires the rate type: ACCOUNT when an account number is set.
+    expect(bodies.some((b) => b.includes('"rateRequestType":["ACCOUNT"]'))).toBe(
+      true,
+    );
   });
 
   it('names the missing address field in the quote error', async () => {

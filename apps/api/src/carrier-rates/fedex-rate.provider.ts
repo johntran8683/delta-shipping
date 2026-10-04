@@ -168,6 +168,9 @@ export class FedExRateProvider implements CarrierRateProvider {
         },
         pickupType: 'USE_SCHEDULED_PICKUP',
         packagingType: 'YOUR_PACKAGING',
+        // FedEx requires the rate type: account-specific rates when an
+        // account number is configured, otherwise list rates.
+        rateRequestType: [creds.accountNumber ? 'ACCOUNT' : 'LIST'],
         requestedPackageLineItems: request.packages.map(toLineItem),
       },
     };
