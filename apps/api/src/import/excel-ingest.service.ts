@@ -22,6 +22,7 @@ import {
   toInt,
   toStr,
 } from './excel-extract';
+import { countryCodeFromName } from '../carrier-rates/country-codes';
 
 type RowCtx = { excelRow: number; data: Record<string, unknown> };
 
@@ -599,14 +600,16 @@ export class ExcelIngestService {
       pickCell(header, 'Postal Code', 'Zip', 'ZIP', 'Postal'),
       30,
     );
-    const country_code = toStr(
-      pickCell(header, 'Country Code', 'Cntry', 'Country Cd'),
-      10,
-    );
     const country_name = toStr(
       pickCell(header, 'Country', 'Country Name'),
       120,
     );
+    // Workbooks with a "Country" name column but no code column: derive the
+    // code from the name so quotes work without manual cleanup.
+    const country_code =
+      toStr(pickCell(header, 'Country Code', 'Cntry', 'Country Cd'), 10) ||
+      countryCodeFromName(country_name) ||
+      null;
 
     return {
       sold_to_name,

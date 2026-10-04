@@ -17,6 +17,7 @@ import { inferCarrierCodeFromShippingType } from '../delivery-notes/carrier-matc
 import { PermissionsService } from '../auth/permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptSecret, encryptSecret } from './crypto';
+import { countryCodeFromName } from './country-codes';
 import { DhlRateProvider } from './dhl-rate.provider';
 import { FedExRateProvider } from './fedex-rate.provider';
 import { UpsRateProvider } from './ups-rate.provider';
@@ -217,6 +218,7 @@ export class CarrierRatesService {
           select: {
             postal_code: true,
             country_code: true,
+            country_name: true,
             city: true,
             state_region: true,
           },
@@ -253,12 +255,24 @@ export class CarrierRatesService {
     }
 
     const destinationPostal = (dn.ship_to_location?.postal_code ?? '').trim();
-    const destinationCountry = normalizeCountryCode(
+    let destinationCountry = normalizeCountryCode(
       dn.ship_to_location?.country_code,
     );
+    if (!destinationCountry) {
+      // Workbooks with a "Country" name column but no code column leave the
+      // code blank — derive it from the name so existing notes can be quoted.
+      destinationCountry =
+        countryCodeFromName(dn.ship_to_location?.country_name) ?? '';
+    }
     if (!destinationPostal || !destinationCountry) {
+      const missing = [
+        !destinationPostal ? 'postal code' : null,
+        !destinationCountry ? 'country code' : null,
+      ]
+        .filter(Boolean)
+        .join(' and ');
       throw new BadRequestException(
-        'The ship-to address is missing a postal code or country code, so no quote can be requested.',
+        `The ship-to address is missing ${missing}, so no quote can be requested.`,
       );
     }
 

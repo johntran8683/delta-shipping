@@ -137,6 +137,105 @@ describe('CarrierRatesService', () => {
     expect(result.quotes[1].totalCharge).toBe(88.5);
   });
 
+  it('derives the destination country code from the country name', async () => {
+    const { service, prisma, permissions } = buildService();
+    permissions.roleHasPermission.mockResolvedValue(true);
+    prisma.deliveryNote.findUnique.mockResolvedValue({
+      id: 'dn-1',
+      dn_number: 'DN-1',
+      current_status: 'SHIPPING_IN_PROGRESS',
+      shipping_group_id: null,
+      shipping_type: 'FedEx Ground',
+      // No country_code — only the name, as imported from a "Country" column.
+      ship_to_location: {
+        postal_code: '80100',
+        country_code: null,
+        country_name: 'United States',
+        city: 'Mombasa',
+        state_region: 'CA',
+      },
+    });
+    prisma.appSetting.findUnique.mockImplementation(
+      async ({ where }: { where: { key: string } }) => {
+        if (where.key === 'rate_quote_origin') {
+          return {
+            value: JSON.stringify({ postalCode: 'V3S 1A1', countryCode: 'CA' }),
+          };
+        }
+        return null;
+      },
+    );
+    prisma.carrierRateConfig.findUnique.mockResolvedValue({
+      client_id: 'fcid',
+      client_secret_enc: encryptSecret('fsecret'),
+      account_number: '999',
+      is_enabled: true,
+    });
+    prisma.packSessionDeliveryNote.findMany.mockResolvedValue([
+      { pack_session_id: 'ps-1' },
+    ]);
+    prisma.packBox.findMany.mockResolvedValue([
+      { weight_lb: '10', length_in: '15', width_in: '15', height_in: '12' },
+    ]);
+    const bodies: string[] = [];
+    global.fetch = jest.fn(async (url: unknown, init?: { body?: unknown }) => {
+      if (String(url).includes('/oauth/token')) {
+        return jsonResponse({
+          access_token: 'tok',
+          token_type: 'Bearer',
+          expires_in: 3600,
+        });
+      }
+      bodies.push(String(init?.body ?? ''));
+      return jsonResponse({
+        output: {
+          rateReplyDetails: [
+            {
+              serviceType: 'FEDEX_GROUND',
+              serviceName: 'FedEx Ground',
+              ratedShipmentDetails: [
+                { totalNetCharge: 42.17, currency: 'USD' },
+              ],
+            },
+          ],
+        },
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await service.getQuotesForDeliveryNote('dn-1', payload);
+
+    expect(result.quotes).toHaveLength(1);
+    expect(bodies.some((b) => b.includes('"countryCode":"US"'))).toBe(true);
+  });
+
+  it('names the missing address field in the quote error', async () => {
+    const { service, prisma, permissions } = buildService();
+    permissions.roleHasPermission.mockResolvedValue(true);
+    prisma.deliveryNote.findUnique.mockResolvedValue({
+      id: 'dn-1',
+      dn_number: 'DN-1',
+      current_status: 'SHIPPING_IN_PROGRESS',
+      shipping_group_id: null,
+      shipping_type: 'FedEx Ground',
+      ship_to_location: {
+        postal_code: '80100',
+        country_code: null,
+        country_name: null,
+        city: 'Mombasa',
+        state_region: 'CA',
+      },
+    });
+    prisma.appSetting.findUnique.mockResolvedValue({
+      value: JSON.stringify({ postalCode: 'V3S 1A1', countryCode: 'CA' }),
+    });
+
+    await expect(
+      service.getQuotesForDeliveryNote('dn-1', payload),
+    ).rejects.toThrow(
+      'The ship-to address is missing country code, so no quote can be requested.',
+    );
+  });
+
   it('quotes only UPS when the ship method is UPS', async () => {
     const { service, prisma, permissions } = buildService();
     permissions.roleHasPermission.mockResolvedValue(true);

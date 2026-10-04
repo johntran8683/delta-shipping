@@ -13,6 +13,7 @@
     "prisma:ensure-picking-claim": "prisma db execute --schema=prisma/schema.prisma --file=prisma/migrations/20260510130000_delivery_notes_picking_claim/migration.sql",
     "prisma:seed": "prisma db seed --schema=prisma/schema.prisma",
     "import:undo": "ts-node --compiler-options {\"module\":\"CommonJS\"} scripts/undo-import-batch.ts",
+    "backfill:country-codes": "ts-node --compiler-options {\"module\":\"CommonJS\"} scripts/backfill-ship-to-country-codes.ts",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
