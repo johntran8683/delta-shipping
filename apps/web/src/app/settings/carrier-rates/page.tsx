@@ -66,6 +66,13 @@ const CARRIERS: Array<{ code: CarrierCode; name: string; docs: string }> = [
   { code: "DHL", name: "DHL Express", docs: "developer.dhl.com → API catalog → DHL Express - MyDHL API → create an app" },
 ];
 
+type SettingsTab = "origin" | CarrierCode;
+
+const TABS: Array<{ id: SettingsTab; label: string }> = [
+  { id: "origin", label: "Origin address" },
+  ...CARRIERS.map((c) => ({ id: c.code as SettingsTab, label: c.name })),
+];
+
 const inputClass =
   "w-full rounded-lg border border-slate-200/90 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm outline-none transition focus:border-slate-300 focus:ring-2 focus:ring-slate-900/10 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-600 dark:focus:ring-slate-100/10";
 
@@ -103,11 +110,13 @@ function toEnvForm(masked: MaskedEnv): EnvForm {
 export default function CarrierRatesSettingsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modal, setModal] = useState<{ title: string; message: string } | null>(null);
+  const [tab, setTab] = useState<"origin" | CarrierCode>("origin");
+  const activeCarrier = CARRIERS.find((c) => c.code === tab);
 
   const [origin, setOrigin] = useState<OriginForm>({
     street: "",
@@ -211,17 +220,17 @@ export default function CarrierRatesSettingsPage() {
     });
   }
 
-  async function onSave() {
+  async function onSaveOrigin() {
     const token = getAccessToken();
     if (!token) {
       router.replace("/login");
       return;
     }
-    setSaving(true);
+    setSavingKey("origin");
     setError(null);
     setNotice(null);
     try {
-      const res = await fetch(`${apiBase}/carrier-rates/settings`, {
+      const res = await fetch(`${apiBase}/carrier-rates/settings/origin`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -235,25 +244,6 @@ export default function CarrierRatesSettingsPage() {
             postalCode: origin.postalCode,
             countryCode: origin.countryCode,
           },
-          ...Object.fromEntries(
-            CARRIERS.map((c) => {
-              const f = forms[c.code];
-              const pick = (e: typeof f.sandbox) => ({
-                clientId: e.clientId,
-                clientSecret: e.clientSecret,
-                accountNumber: e.accountNumber,
-                isEnabled: e.isEnabled,
-              });
-              return [
-                c.code,
-                {
-                  activeEnvironment: f.activeEnvironment,
-                  sandbox: pick(f.sandbox),
-                  production: pick(f.production),
-                },
-              ];
-            }),
-          ),
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -266,12 +256,61 @@ export default function CarrierRatesSettingsPage() {
         setError(formatApiErrorPayload(body) + (res.status ? ` (HTTP ${res.status})` : ""));
         return;
       }
-      setNotice("Carrier rate settings saved.");
+      setNotice("Origin address saved.");
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
     } finally {
-      setSaving(false);
+      setSavingKey(null);
+    }
+  }
+
+  async function onSaveCarrier(carrier: CarrierCode) {
+    const token = getAccessToken();
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+    setSavingKey(carrier);
+    setError(null);
+    setNotice(null);
+    try {
+      const f = forms[carrier];
+      const pick = (e: typeof f.sandbox) => ({
+        clientId: e.clientId,
+        clientSecret: e.clientSecret,
+        accountNumber: e.accountNumber,
+        isEnabled: e.isEnabled,
+      });
+      const res = await fetch(`${apiBase}/carrier-rates/settings/${carrier}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          activeEnvironment: f.activeEnvironment,
+          sandbox: pick(f.sandbox),
+          production: pick(f.production),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        clearSession();
+        router.replace("/login");
+        return;
+      }
+      if (!res.ok) {
+        setError(formatApiErrorPayload(body) + (res.status ? ` (HTTP ${res.status})` : ""));
+        return;
+      }
+      const name = CARRIERS.find((c) => c.code === carrier)?.name ?? carrier;
+      setNotice(`${name} settings saved.`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setSavingKey(null);
     }
   }
 
@@ -432,9 +471,28 @@ export default function CarrierRatesSettingsPage() {
           </div>
         ) : null}
 
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Carrier rate settings">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
+                tab === t.id
+                  ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+                  : "border border-slate-300 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
         {loading ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
-        ) : (
+        ) : tab === "origin" ? (
           <>
             <section className="overflow-hidden rounded-xl border border-slate-200/90 bg-[var(--app-surface)] shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-800/90 dark:shadow-none">
               <div className="border-b border-slate-200/80 px-5 py-4 dark:border-slate-800">
@@ -504,61 +562,72 @@ export default function CarrierRatesSettingsPage() {
               </div>
             </section>
 
-            {CARRIERS.map((c) => (
-              <section
-                key={c.code}
-                className="overflow-hidden rounded-xl border border-slate-200/90 bg-[var(--app-surface)] shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-800/90 dark:shadow-none"
+            <div className="flex items-center justify-end gap-3 pb-8">
+              <button
+                type="button"
+                disabled={savingKey === "origin"}
+                onClick={() => void onSaveOrigin()}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
               >
-                <div className="border-b border-slate-200/80 px-5 py-4 dark:border-slate-800">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {c.name}
-                      </h3>
-                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                        {c.docs}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                        Quotes use
-                      </span>
-                      {(["SANDBOX", "PRODUCTION"] as CarrierEnvironment[]).map((env) => (
-                        <button
-                          key={env}
-                          type="button"
-                          onClick={() => setCarrierField(c.code, "active", "activeEnvironment", env)}
-                          className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                            forms[c.code].activeEnvironment === env
-                              ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
-                              : "border border-slate-300 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
-                          }`}
-                        >
-                          {env === "SANDBOX" ? "Sandbox" : "Production"}
-                        </button>
-                      ))}
-                    </div>
+                {savingKey === "origin" ? "Saving…" : "Save origin address"}
+              </button>
+            </div>
+          </>
+        ) : activeCarrier ? (
+          <>
+            <section
+              key={activeCarrier.code}
+              className="overflow-hidden rounded-xl border border-slate-200/90 bg-[var(--app-surface)] shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-800/90 dark:shadow-none"
+            >
+              <div className="border-b border-slate-200/80 px-5 py-4 dark:border-slate-800">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      {activeCarrier.name}
+                    </h3>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      {activeCarrier.docs}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                      Quotes use
+                    </span>
+                    {(["SANDBOX", "PRODUCTION"] as CarrierEnvironment[]).map((env) => (
+                      <button
+                        key={env}
+                        type="button"
+                        onClick={() => setCarrierField(activeCarrier.code, "active", "activeEnvironment", env)}
+                        className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                          forms[activeCarrier.code].activeEnvironment === env
+                            ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+                            : "border border-slate-300 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                        }`}
+                      >
+                        {env === "SANDBOX" ? "Sandbox" : "Production"}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <div className="space-y-4 px-5 py-4">
-                  {renderEnvFields(c.code, "SANDBOX")}
-                  {renderEnvFields(c.code, "PRODUCTION")}
-                </div>
-              </section>
-            ))}
+              </div>
+              <div className="space-y-4 px-5 py-4">
+                {renderEnvFields(activeCarrier.code, "SANDBOX")}
+                {renderEnvFields(activeCarrier.code, "PRODUCTION")}
+              </div>
+            </section>
 
             <div className="flex items-center justify-end gap-3 pb-8">
               <button
                 type="button"
-                disabled={saving}
-                onClick={() => void onSave()}
+                disabled={savingKey === activeCarrier.code}
+                onClick={() => void onSaveCarrier(activeCarrier.code)}
                 className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
               >
-                {saving ? "Saving…" : "Save changes"}
+                {savingKey === activeCarrier.code ? "Saving…" : `Save ${activeCarrier.name} settings`}
               </button>
             </div>
           </>
-        )}
+        ) : null}
       </div>
       {modal ? (
         <ResponseModal

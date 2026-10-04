@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { CarrierRatesService } from './carrier-rates.service';
 import { encryptSecret } from './crypto';
+import type { SaveCarrierSettingsDto } from './dto/carrier-rates.dto';
 import type { JwtPayload } from '../auth/jwt-payload';
 
 const TEST_KEY =
@@ -36,6 +37,7 @@ describe('CarrierRatesService', () => {
         findUnique: jest.fn(),
         findMany: jest.fn(),
         upsert: jest.fn(),
+        update: jest.fn(),
       },
       deliveryNote: { findUnique: jest.fn(), findMany: jest.fn() },
       packSessionDeliveryNote: { findMany: jest.fn() },
@@ -377,5 +379,189 @@ describe('CarrierRatesService', () => {
     await expect(service.getSettings(payload)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+  });
+
+  it('saves the origin address and gates non-supervisors', async () => {
+    const { service, prisma } = buildService();
+    prisma.role.findUnique.mockResolvedValue({ code: 'SUPERVISOR' });
+
+    await service.saveOrigin(
+      {
+        origin: {
+          street: '17850 56 Ave',
+          city: 'Surrey',
+          stateOrProvinceCode: 'BC',
+          postalCode: 'V3S 1A1',
+          countryCode: 'ca',
+        },
+      },
+      payload,
+    );
+
+    expect(prisma.appSetting.upsert).toHaveBeenCalledWith({
+      where: { key: 'rate_quote_origin' },
+      create: {
+        key: 'rate_quote_origin',
+        value: JSON.stringify({
+          street: '17850 56 Ave',
+          city: 'Surrey',
+          stateOrProvinceCode: 'BC',
+          postalCode: 'V3S 1A1',
+          countryCode: 'CA',
+        }),
+      },
+      update: {
+        value: JSON.stringify({
+          street: '17850 56 Ave',
+          city: 'Surrey',
+          stateOrProvinceCode: 'BC',
+          postalCode: 'V3S 1A1',
+          countryCode: 'CA',
+        }),
+      },
+    });
+    expect(prisma.carrierRateConfig.upsert).not.toHaveBeenCalled();
+
+    prisma.role.findUnique.mockResolvedValue({ code: 'PACKER' });
+    await expect(
+      service.saveOrigin(
+        {
+          origin: { postalCode: 'V3S 1A1', countryCode: 'CA' },
+        },
+        payload,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  function carrierDto(
+    overrides: Partial<SaveCarrierSettingsDto> = {},
+  ): SaveCarrierSettingsDto {
+    return {
+      activeEnvironment: 'SANDBOX',
+      sandbox: {
+        clientId: 'test-key',
+        clientSecret: 'test-secret',
+        accountNumber: '800717485',
+        isEnabled: true,
+      },
+      production: {
+        clientId: '',
+        clientSecret: '',
+        accountNumber: '',
+        isEnabled: false,
+      },
+      ...overrides,
+    };
+  }
+
+  it('saves one carrier without touching the others', async () => {
+    const { service, prisma } = buildService();
+    prisma.role.findUnique.mockResolvedValue({ code: 'SUPERVISOR' });
+    prisma.appSetting.findUnique.mockResolvedValue(null);
+    prisma.carrierRateConfig.findUnique.mockResolvedValue(null);
+
+    await service.saveCarrier('FEDEX', carrierDto(), payload);
+
+    // Active environment merged with the stored fallback for other carriers.
+    expect(prisma.appSetting.upsert).toHaveBeenCalledWith({
+      where: { key: 'rate_quote_active_env' },
+      create: {
+        key: 'rate_quote_active_env',
+        value: JSON.stringify({ FEDEX: 'SANDBOX', UPS: 'SANDBOX', DHL: 'SANDBOX' }),
+      },
+      update: {
+        value: JSON.stringify({ FEDEX: 'SANDBOX', UPS: 'SANDBOX', DHL: 'SANDBOX' }),
+      },
+    });
+    // Enabled sandbox env is upserted with an encrypted secret…
+    expect(prisma.carrierRateConfig.upsert).toHaveBeenCalledTimes(1);
+    const upsertArg = prisma.carrierRateConfig.upsert.mock.calls[0][0];
+    expect(upsertArg.where.carrier_code_environment).toEqual({
+      carrier_code: 'FEDEX',
+      environment: 'SANDBOX',
+    });
+    expect(upsertArg.create.client_id).toBe('test-key');
+    expect(upsertArg.create.is_enabled).toBe(true);
+    expect(upsertArg.create.client_secret_enc).not.toContain('test-secret');
+    // …while the disabled production env with no stored row is skipped.
+    expect(prisma.carrierRateConfig.update).not.toHaveBeenCalled();
+  });
+
+  it('requires a secret the first time an enabled environment is saved', async () => {
+    const { service, prisma } = buildService();
+    prisma.role.findUnique.mockResolvedValue({ code: 'SUPERVISOR' });
+    prisma.carrierRateConfig.findUnique.mockResolvedValue(null);
+
+    const dto = carrierDto();
+    dto.sandbox.clientSecret = '';
+    await expect(service.saveCarrier('FEDEX', dto, payload)).rejects.toThrow(
+      'FEDEX SANDBOX: a client secret is required the first time credentials are saved.',
+    );
+  });
+
+  it('keeps the stored secret when a blank one is sent for an enabled env', async () => {
+    const { service, prisma } = buildService();
+    prisma.role.findUnique.mockResolvedValue({ code: 'SUPERVISOR' });
+    prisma.carrierRateConfig.findUnique.mockResolvedValue({
+      carrier_code: 'FEDEX',
+      environment: 'SANDBOX',
+      client_secret_enc: encryptSecret('old-secret'),
+    });
+
+    const dto = carrierDto();
+    dto.sandbox.clientSecret = '';
+    await service.saveCarrier('FEDEX', dto, payload);
+
+    const upsertArg = prisma.carrierRateConfig.upsert.mock.calls[0][0];
+    expect(upsertArg.update.client_secret_enc).toBeUndefined();
+    expect(upsertArg.update.client_id).toBe('test-key');
+  });
+
+  it('disabling an environment keeps stored credentials and switches it off', async () => {
+    const { service, prisma } = buildService();
+    prisma.role.findUnique.mockResolvedValue({ code: 'SUPERVISOR' });
+    const existing = {
+      carrier_code: 'FEDEX',
+      environment: 'SANDBOX',
+      client_id: 'old-key',
+      client_secret_enc: encryptSecret('old-secret'),
+      account_number: '111',
+      is_enabled: true,
+    };
+    prisma.carrierRateConfig.findUnique.mockImplementation((args: {
+      where: { carrier_code_environment: { environment: string } };
+    }) =>
+      Promise.resolve(
+        args.where.carrier_code_environment.environment === 'SANDBOX'
+          ? existing
+          : null,
+      ),
+    );
+
+    const dto = carrierDto();
+    dto.sandbox.isEnabled = false;
+    dto.sandbox.clientId = '';
+    dto.sandbox.clientSecret = '';
+    await service.saveCarrier('FEDEX', dto, payload);
+
+    expect(prisma.carrierRateConfig.upsert).not.toHaveBeenCalled();
+    expect(prisma.carrierRateConfig.update).toHaveBeenCalledTimes(1);
+    const updateArg = prisma.carrierRateConfig.update.mock.calls[0][0];
+    expect(updateArg.data.is_enabled).toBe(false);
+    expect(updateArg.data.client_secret_enc).toBeUndefined();
+  });
+
+  it('rejects unknown carriers and non-supervisors', async () => {
+    const { service, prisma } = buildService();
+    prisma.role.findUnique.mockResolvedValue({ code: 'SUPERVISOR' });
+
+    await expect(
+      service.saveCarrier('USPS', carrierDto(), payload),
+    ).rejects.toThrow('Unknown carrier: USPS');
+
+    prisma.role.findUnique.mockResolvedValue({ code: 'SHIPPER' });
+    await expect(
+      service.saveCarrier('FEDEX', carrierDto(), payload),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

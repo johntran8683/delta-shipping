@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
@@ -7,7 +7,8 @@ import type { JwtPayload } from '../auth/jwt-payload';
 import { CarrierRatesService } from './carrier-rates.service';
 import {
   GetRateQuotesDto,
-  SaveCarrierRateSettingsDto,
+  SaveCarrierSettingsDto,
+  SaveOriginAddressDto,
   TestCarrierConnectionDto,
 } from './dto/carrier-rates.dto';
 
@@ -36,15 +37,28 @@ export class CarrierRatesController {
     return this.carrierRates.getSettings(payload);
   }
 
-  /** Save origin address + carrier credentials (supervisor). */
-  @Put('settings')
+  /** Save the warehouse origin address (supervisor). */
+  @Put('settings/origin')
   @RequirePermissions('users.manage')
-  saveSettings(
-    @Body() dto: SaveCarrierRateSettingsDto,
+  saveOrigin(
+    @Body() dto: SaveOriginAddressDto,
     @CurrentPayload() payload: JwtPayload,
   ) {
     return this.carrierRates
-      .saveSettings(dto, payload)
+      .saveOrigin(dto, payload)
+      .then(() => ({ ok: true }));
+  }
+
+  /** Save one carrier's settings (supervisor). */
+  @Put('settings/:carrierCode')
+  @RequirePermissions('users.manage')
+  saveCarrier(
+    @Param('carrierCode') carrierCode: string,
+    @Body() dto: SaveCarrierSettingsDto,
+    @CurrentPayload() payload: JwtPayload,
+  ) {
+    return this.carrierRates
+      .saveCarrier(carrierCode, dto, payload)
       .then(() => ({ ok: true }));
   }
 

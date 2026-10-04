@@ -6,6 +6,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -68,6 +69,14 @@ class OriginAddressDto {
 }
 
 class CarrierEnvCredentialsDto {
+  @IsBoolean()
+  isEnabled!: boolean;
+
+  /**
+   * Required only when the environment is enabled — disabled environments
+   * may be left blank so supervisors only fill in what they actually use.
+   */
+  @ValidateIf((o) => o.isEnabled)
   @IsNotEmpty({ message: 'Client ID is required' })
   @IsString()
   @MaxLength(200)
@@ -84,9 +93,6 @@ class CarrierEnvCredentialsDto {
   @IsString()
   @MaxLength(80)
   accountNumber?: string;
-
-  @IsBoolean()
-  isEnabled!: boolean;
 }
 
 class CarrierSettingsDto {
@@ -102,21 +108,12 @@ class CarrierSettingsDto {
   production!: CarrierEnvCredentialsDto;
 }
 
-/** Save the carrier-rate configuration (origin address + credentials). */
-export class SaveCarrierRateSettingsDto {
+/** Save the warehouse origin address only. */
+export class SaveOriginAddressDto {
   @ValidateNested()
   @Type(() => OriginAddressDto)
   origin!: OriginAddressDto;
-
-  @ValidateNested()
-  @Type(() => CarrierSettingsDto)
-  FEDEX!: CarrierSettingsDto;
-
-  @ValidateNested()
-  @Type(() => CarrierSettingsDto)
-  UPS!: CarrierSettingsDto;
-
-  @ValidateNested()
-  @Type(() => CarrierSettingsDto)
-  DHL!: CarrierSettingsDto;
 }
+
+/** Save one carrier's settings (active environment + both environments). */
+export class SaveCarrierSettingsDto extends CarrierSettingsDto {}

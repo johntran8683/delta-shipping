@@ -29,7 +29,10 @@ import type {
   QuoteRequest,
   RateQuote,
 } from './carrier-rate-provider';
-import type { SaveCarrierRateSettingsDto } from './dto/carrier-rates.dto';
+import type {
+  SaveCarrierSettingsDto,
+  SaveOriginAddressDto,
+} from './dto/carrier-rates.dto';
 
 const ORIGIN_SETTING_KEY = 'rate_quote_origin';
 const ACTIVE_ENV_SETTING_KEY = 'rate_quote_active_env';
@@ -417,97 +420,104 @@ export class CarrierRatesService {
     return { origin, carriers: view };
   }
 
-  async saveSettings(
-    dto: SaveCarrierRateSettingsDto,
+  /** Save the warehouse origin address only. */
+  async saveOrigin(
+    dto: SaveOriginAddressDto,
     payload: JwtPayload,
   ): Promise<void> {
     await this.assertSupervisorOrSystem(payload.activeRoleId);
 
+    const value = JSON.stringify({
+      street: dto.origin.street?.trim() || undefined,
+      city: dto.origin.city?.trim() || undefined,
+      stateOrProvinceCode: dto.origin.stateOrProvinceCode?.trim() || undefined,
+      postalCode: dto.origin.postalCode.trim(),
+      countryCode: normalizeCountryCode(dto.origin.countryCode),
+    });
     await this.prisma.appSetting.upsert({
       where: { key: ORIGIN_SETTING_KEY },
-      create: {
-        key: ORIGIN_SETTING_KEY,
-        value: JSON.stringify({
-          street: dto.origin.street?.trim() || undefined,
-          city: dto.origin.city?.trim() || undefined,
-          stateOrProvinceCode:
-            dto.origin.stateOrProvinceCode?.trim() || undefined,
-          postalCode: dto.origin.postalCode.trim(),
-          countryCode: normalizeCountryCode(dto.origin.countryCode),
-        }),
-      },
-      update: {
-        value: JSON.stringify({
-          street: dto.origin.street?.trim() || undefined,
-          city: dto.origin.city?.trim() || undefined,
-          stateOrProvinceCode:
-            dto.origin.stateOrProvinceCode?.trim() || undefined,
-          postalCode: dto.origin.postalCode.trim(),
-          countryCode: normalizeCountryCode(dto.origin.countryCode),
-        }),
-      },
+      create: { key: ORIGIN_SETTING_KEY, value },
+      update: { value },
     });
+  }
 
+  /** Save one carrier's settings (active environment + both environments). */
+  async saveCarrier(
+    carrierCode: string,
+    dto: SaveCarrierSettingsDto,
+    payload: JwtPayload,
+  ): Promise<void> {
+    await this.assertSupervisorOrSystem(payload.activeRoleId);
+    const code = (carrierCode ?? '').toUpperCase();
+    if (code !== 'FEDEX' && code !== 'UPS' && code !== 'DHL') {
+      throw new BadRequestException(`Unknown carrier: ${carrierCode}`);
+    }
+
+    const activeEnvs = await this.readActiveEnvironments();
+    const value = JSON.stringify({ ...activeEnvs, [code]: dto.activeEnvironment });
     await this.prisma.appSetting.upsert({
       where: { key: ACTIVE_ENV_SETTING_KEY },
-      create: {
-        key: ACTIVE_ENV_SETTING_KEY,
-        value: JSON.stringify({
-          FEDEX: dto.FEDEX.activeEnvironment,
-          UPS: dto.UPS.activeEnvironment,
-          DHL: dto.DHL.activeEnvironment,
-        }),
-      },
-      update: {
-        value: JSON.stringify({
-          FEDEX: dto.FEDEX.activeEnvironment,
-          UPS: dto.UPS.activeEnvironment,
-          DHL: dto.DHL.activeEnvironment,
-        }),
-      },
+      create: { key: ACTIVE_ENV_SETTING_KEY, value },
+      update: { value },
     });
 
-    for (const code of ['FEDEX', 'UPS', 'DHL'] as CarrierCode[]) {
-      const carrierDto = dto[code];
-      for (const env of ['SANDBOX', 'PRODUCTION'] as CarrierEnvironment[]) {
-        const envDto =
-          env === 'SANDBOX' ? carrierDto.sandbox : carrierDto.production;
-        const secretTrimmed = envDto.clientSecret.trim();
-        const existing = await this.prisma.carrierRateConfig.findUnique({
+    for (const env of ['SANDBOX', 'PRODUCTION'] as CarrierEnvironment[]) {
+      const envDto = env === 'SANDBOX' ? dto.sandbox : dto.production;
+      const secretTrimmed = envDto.clientSecret.trim();
+      const existing = await this.prisma.carrierRateConfig.findUnique({
+        where: {
+          carrier_code_environment: { carrier_code: code, environment: env },
+        },
+      });
+      if (!envDto.isEnabled) {
+        // Disabled environments need no credentials. Keep any stored ones
+        // and just switch the environment off; skip when nothing was ever
+        // saved for it.
+        if (!existing) continue;
+        await this.prisma.carrierRateConfig.update({
           where: {
             carrier_code_environment: { carrier_code: code, environment: env },
           },
-        });
-        // Blank secret keeps the stored one; a missing stored one with a blank
-        // secret is a user error.
-        if (!secretTrimmed && !existing) {
-          throw new BadRequestException(
-            `${code} ${env}: a client secret is required the first time credentials are saved.`,
-          );
-        }
-        const data = {
-          client_id: envDto.clientId.trim(),
-          account_number: envDto.accountNumber?.trim() || null,
-          is_enabled: envDto.isEnabled,
-          ...(secretTrimmed
-            ? { client_secret_enc: encryptSecret(secretTrimmed) }
-            : {}),
-        };
-        await this.prisma.carrierRateConfig.upsert({
-          where: {
-            carrier_code_environment: { carrier_code: code, environment: env },
+          data: {
+            client_id: envDto.clientId.trim(),
+            account_number: envDto.accountNumber?.trim() || null,
+            is_enabled: false,
+            ...(secretTrimmed
+              ? { client_secret_enc: encryptSecret(secretTrimmed) }
+              : {}),
           },
-          create: {
-            carrier_code: code,
-            environment: env,
-            client_secret_enc: data.client_secret_enc!,
-            client_id: data.client_id,
-            account_number: data.account_number,
-            is_enabled: data.is_enabled,
-          },
-          update: data,
         });
+        continue;
       }
+      // Blank secret keeps the stored one; a missing stored one with a blank
+      // secret is a user error.
+      if (!secretTrimmed && !existing) {
+        throw new BadRequestException(
+          `${code} ${env}: a client secret is required the first time credentials are saved.`,
+        );
+      }
+      const data = {
+        client_id: envDto.clientId.trim(),
+        account_number: envDto.accountNumber?.trim() || null,
+        is_enabled: envDto.isEnabled,
+        ...(secretTrimmed
+          ? { client_secret_enc: encryptSecret(secretTrimmed) }
+          : {}),
+      };
+      await this.prisma.carrierRateConfig.upsert({
+        where: {
+          carrier_code_environment: { carrier_code: code, environment: env },
+        },
+        create: {
+          carrier_code: code,
+          environment: env,
+          client_secret_enc: data.client_secret_enc!,
+          client_id: data.client_id,
+          account_number: data.account_number,
+          is_enabled: data.is_enabled,
+        },
+        update: data,
+      });
     }
   }
 
