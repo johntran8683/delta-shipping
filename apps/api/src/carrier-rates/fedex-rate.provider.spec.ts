@@ -128,4 +128,34 @@ describe('FedExRateProvider', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain('/oauth/token');
   });
+
+  it('sends shippingChargesPayment with the payor account matching the shipper account', async () => {
+    const calls = mockFetchSequence([
+      jsonResponse({ access_token: 'tok', expires_in: 3600 }),
+      jsonResponse({ output: { rateReplyDetails: [] } }),
+    ]);
+    const provider = new FedExRateProvider();
+    await provider.getQuotes(REQUEST, CREDS);
+    const body = JSON.parse(calls[1].init!.body as string);
+    expect(body.accountNumber).toEqual({ value: '123456789' });
+    expect(body.requestedShipment.shippingChargesPayment).toEqual({
+      paymentType: 'SENDER',
+      payor: {
+        responsibleParty: { accountNumber: { value: '123456789' } },
+      },
+    });
+  });
+
+  it('omits shippingChargesPayment when no account number is configured', async () => {
+    const calls = mockFetchSequence([
+      jsonResponse({ access_token: 'tok', expires_in: 3600 }),
+      jsonResponse({ output: { rateReplyDetails: [] } }),
+    ]);
+    const provider = new FedExRateProvider();
+    await provider.getQuotes(REQUEST, { ...CREDS, accountNumber: null });
+    const body = JSON.parse(calls[1].init!.body as string);
+    expect(body.accountNumber).toBeUndefined();
+    expect(body.requestedShipment.shippingChargesPayment).toBeUndefined();
+    expect(body.requestedShipment.rateRequestType).toEqual(['LIST']);
+  });
 });

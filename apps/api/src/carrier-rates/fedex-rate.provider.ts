@@ -151,31 +151,41 @@ export class FedExRateProvider implements CarrierRateProvider {
       throw new Error('At least one package is needed for a FedEx rate quote.');
     }
     const token = await this.getAccessToken(creds);
+    const requestedShipment: Record<string, unknown> = {
+      shipper: {
+        address: {
+          postalCode: request.origin.postalCode,
+          countryCode: request.origin.countryCode,
+        },
+      },
+      recipient: {
+        address: {
+          postalCode: request.destination.postalCode,
+          countryCode: request.destination.countryCode,
+        },
+      },
+      pickupType: 'USE_SCHEDULED_PICKUP',
+      packagingType: 'YOUR_PACKAGING',
+      // FedEx requires the rate type: account-specific rates when an
+      // account number is configured, otherwise list rates.
+      rateRequestType: [creds.accountNumber ? 'ACCOUNT' : 'LIST'],
+      requestedPackageLineItems: request.packages.map(toLineItem),
+    };
     const payload: Record<string, unknown> = {
       rateRequestControlParameters: { returnTransitTimes: true },
-      requestedShipment: {
-        shipper: {
-          address: {
-            postalCode: request.origin.postalCode,
-            countryCode: request.origin.countryCode,
-          },
-        },
-        recipient: {
-          address: {
-            postalCode: request.destination.postalCode,
-            countryCode: request.destination.countryCode,
-          },
-        },
-        pickupType: 'USE_SCHEDULED_PICKUP',
-        packagingType: 'YOUR_PACKAGING',
-        // FedEx requires the rate type: account-specific rates when an
-        // account number is configured, otherwise list rates.
-        rateRequestType: [creds.accountNumber ? 'ACCOUNT' : 'LIST'],
-        requestedPackageLineItems: request.packages.map(toLineItem),
-      },
+      requestedShipment,
     };
     if (creds.accountNumber) {
       payload.accountNumber = { value: creds.accountNumber };
+      // FedEx defaults the payment type to SENDER for account rates and
+      // rejects the request (ACCOUNT.NUMBER.MISMATCH) unless the payor
+      // account matches the shipper account number.
+      requestedShipment.shippingChargesPayment = {
+        paymentType: 'SENDER',
+        payor: {
+          responsibleParty: { accountNumber: { value: creds.accountNumber } },
+        },
+      };
     }
 
     const res = await fetchWithTimeout(
