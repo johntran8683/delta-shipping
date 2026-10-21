@@ -10,6 +10,7 @@ import { StatusBadgeWithHover } from "@/components/status-badge-with-hover";
 import { detailStatusHoverInput } from "@/lib/dn-status-hover";
 import type { StatusHistoryEntry } from "@/lib/dn-status-hover";
 import { ResponseModal } from "@/components/response-modal";
+import { ConfirmModal } from "@/components/confirm-modal";
 import { clearSession, getAccessToken, getActiveRoleCode } from "@/lib/auth-storage";
 import { apiBase } from "@/lib/config";
 import { DeliveryNoteNumber } from "@/components/delivery-note-number";
@@ -1748,6 +1749,19 @@ export default function DeliveryNoteDetailPage() {
   const [packRevertOpen, setPackRevertOpen] = useState<{
     toStatus: string;
   } | null>(null);
+  /** Pending "already shipping another note" warning (status transition). */
+  const [doubleClaimConfirm, setDoubleClaimConfirm] = useState<{
+    warning: string;
+    inProgressDn: string | null;
+    toStatus: string;
+    opts?: StatusTransitionOpts;
+  } | null>(null);
+  /** Pending "already packing another note" warning (start-packing flow). */
+  const [packDoubleClaim, setPackDoubleClaim] = useState<{
+    warning: string;
+    inProgressDn: string | null;
+    peerIds: string[];
+  } | null>(null);
   const [shipMarkOpen, setShipMarkOpen] = useState(false);
   const [shipTrackingNumber, setShipTrackingNumber] = useState("");
   const [shipMarkSaveError, setShipMarkSaveError] = useState<string | null>(
@@ -1838,16 +1852,18 @@ export default function DeliveryNoteDetailPage() {
     void load();
   }, [ready, id, load, router]);
 
+  type StatusTransitionOpts = {
+    trackingNumber?: string;
+    message?: string;
+    confirmDoubleClaim?: boolean;
+    shipTogetherIds?: string[];
+    invoiceNumbers?: { deliveryNoteId: string; invoiceNumber: string }[];
+    rateQuote?: RateQuoteSelection | null;
+  };
+
   async function runStatusTransition(
     toStatus: string,
-    opts?: {
-      trackingNumber?: string;
-      message?: string;
-      confirmDoubleClaim?: boolean;
-      shipTogetherIds?: string[];
-      invoiceNumbers?: { deliveryNoteId: string; invoiceNumber: string }[];
-      rateQuote?: RateQuoteSelection | null;
-    },
+    opts?: StatusTransitionOpts,
   ): Promise<boolean> {
     const token = getAccessToken();
     if (!token) return false;
@@ -1899,15 +1915,15 @@ export default function DeliveryNoteDetailPage() {
         return false;
       }
       if (data.requiresConfirmation) {
-        const confirmed = window.confirm(
-          `${data.warning ?? "You already have a note in progress."}\n\nClick OK to proceed anyway, or Cancel to stop.`,
-        );
-        if (confirmed) {
-          return runStatusTransition(toStatus, {
-            ...opts,
-            confirmDoubleClaim: true,
-          });
-        }
+        // The API warns the user already has a note in progress; show the
+        // warning in a ConfirmModal. Confirming retries with
+        // confirmDoubleClaim via handleDoubleClaimConfirm.
+        setDoubleClaimConfirm({
+          warning: data.warning ?? "You already have a note in progress.",
+          inProgressDn: data.inProgressNote?.dn_number ?? null,
+          toStatus,
+          opts,
+        });
         return false;
       }
       if (!res.ok) {
@@ -1926,6 +1942,16 @@ export default function DeliveryNoteDetailPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleDoubleClaimConfirm() {
+    const pending = doubleClaimConfirm;
+    setDoubleClaimConfirm(null);
+    if (!pending) return;
+    await runStatusTransition(pending.toStatus, {
+      ...pending.opts,
+      confirmDoubleClaim: true,
+    });
   }
 
   async function postTransition(toStatus: string) {
@@ -2173,7 +2199,12 @@ export default function DeliveryNoteDetailPage() {
   ): Promise<
     | { ok: true; detail: Detail }
     | { ok: false; message: string }
-    | { ok: false; requiresConfirmation: true; warning: string }
+    | {
+        ok: false;
+        requiresConfirmation: true;
+        warning: string;
+        inProgressDn: string | null;
+      }
   > {
     const token = getAccessToken();
     if (!token) return { ok: false, message: "Not signed in" };
@@ -2193,6 +2224,7 @@ export default function DeliveryNoteDetailPage() {
         ok: false,
         requiresConfirmation: true,
         warning: data.warning ?? "You already have a note in progress.",
+        inProgressDn: data.inProgressNote?.dn_number ?? null,
       };
     }
     if (!res.ok) {
@@ -2411,27 +2443,39 @@ export default function DeliveryNoteDetailPage() {
       const r = await packStartRequest(peerIds);
       if (!r.ok) {
         if ("requiresConfirmation" in r) {
-          // Show warning; user can confirm to proceed.
-          const confirmed = window.confirm(
-            `${r.warning}\n\nClick OK to start packing anyway, or Cancel to stop.`,
-          );
-          if (confirmed) {
-            const r2 = await packStartRequest(peerIds, true);
-            if (!r2.ok) {
-              setStartPackingSaveError(
-                "message" in r2 ? r2.message : "Failed to start packing",
-              );
-              return;
-            }
-            setDetail(r2.detail);
-            closeStartPackingDialog();
-          }
+          // Show the warning in a ConfirmModal; confirming retries with
+          // confirmDoubleClaim via handlePackDoubleClaimConfirm.
+          setPackDoubleClaim({
+            warning: r.warning,
+            inProgressDn: r.inProgressDn,
+            peerIds,
+          });
           return;
         }
         setStartPackingSaveError(r.message);
         return;
       }
       setDetail(r.detail);
+      closeStartPackingDialog();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePackDoubleClaimConfirm() {
+    const pending = packDoubleClaim;
+    setPackDoubleClaim(null);
+    if (!pending) return;
+    setBusy(true);
+    try {
+      const r2 = await packStartRequest(pending.peerIds, true);
+      if (!r2.ok) {
+        setStartPackingSaveError(
+          "message" in r2 ? r2.message : "Failed to start packing",
+        );
+        return;
+      }
+      setDetail(r2.detail);
       closeStartPackingDialog();
     } finally {
       setBusy(false);
@@ -3687,6 +3731,36 @@ export default function DeliveryNoteDetailPage() {
         onClose={() => setError(null)}
         message={error ?? ""}
         variant="error"
+      />
+
+      <ConfirmModal
+        open={doubleClaimConfirm != null}
+        title="Start shipping this note too?"
+        message={
+          doubleClaimConfirm?.inProgressDn
+            ? "You are already shipping another note. Starting this one means you will be shipping both at the same time."
+            : (doubleClaimConfirm?.warning ?? "")
+        }
+        highlightLabel="Already shipping"
+        highlightValue={doubleClaimConfirm?.inProgressDn ?? undefined}
+        confirmLabel="Start shipping anyway"
+        onCancel={() => setDoubleClaimConfirm(null)}
+        onConfirm={handleDoubleClaimConfirm}
+      />
+
+      <ConfirmModal
+        open={packDoubleClaim != null}
+        title="Start packing this note too?"
+        message={
+          packDoubleClaim?.inProgressDn
+            ? "You are already packing another note. Starting this one means you will be packing both at the same time."
+            : (packDoubleClaim?.warning ?? "")
+        }
+        highlightLabel="Already packing"
+        highlightValue={packDoubleClaim?.inProgressDn ?? undefined}
+        confirmLabel="Start packing anyway"
+        onCancel={() => setPackDoubleClaim(null)}
+        onConfirm={handlePackDoubleClaimConfirm}
       />
 
       {portalMounted && packingListOpen && detail?.completed_pack_sessions?.[0] ? (
