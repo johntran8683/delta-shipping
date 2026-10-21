@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
@@ -6,6 +14,7 @@ import { CurrentPayload } from '../auth/decorators/current-payload.decorator';
 import type { JwtPayload } from '../auth/jwt-payload';
 import { CarrierRatesService } from './carrier-rates.service';
 import {
+  CheckShipToAddressDto,
   GetRateQuotesDto,
   SaveCarrierSettingsDto,
   SaveOriginAddressDto,
@@ -17,6 +26,22 @@ import {
 export class CarrierRatesController {
   constructor(private readonly carrierRates: CarrierRatesService) {}
 
+  /**
+   * Compare the ship-to city and state with the postal code before quoting.
+   * Does not change the customer ship-to.
+   */
+  @Post('address-check')
+  @RequirePermissions('shipment.create')
+  checkAddress(
+    @Body() dto: CheckShipToAddressDto,
+    @CurrentPayload() payload: JwtPayload,
+  ) {
+    return this.carrierRates.checkAddressForDeliveryNote(
+      dto.deliveryNoteId,
+      payload,
+    );
+  }
+
   /** Live rate quotes for a delivery note's shipment group (shipper). */
   @Post('quotes')
   @RequirePermissions('shipment.create')
@@ -27,6 +52,7 @@ export class CarrierRatesController {
     return this.carrierRates.getQuotesForDeliveryNote(
       dto.deliveryNoteId,
       payload,
+      dto.destination,
     );
   }
 

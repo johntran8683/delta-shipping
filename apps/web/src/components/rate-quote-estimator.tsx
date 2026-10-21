@@ -28,6 +28,29 @@ type QuotesResponse = {
   dnNumbers: string[];
 };
 
+type AddressView = {
+  name: string | null;
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string;
+  countryCode: string;
+};
+
+type SuggestedAddress = {
+  city: string | null;
+  state: string;
+  postalCode: string;
+  countryCode: string;
+};
+
+type AddressCheck = {
+  status: "ready" | "confirm" | "blocked";
+  message: string | null;
+  current: AddressView;
+  suggestions: SuggestedAddress[];
+};
+
 function formatMoney(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat(undefined, {
@@ -50,6 +73,17 @@ function formatTransit(q: RateQuote): string | null {
     }
   }
   return null;
+}
+
+function countryLabel(code: string): string {
+  if (code === "US") return "United States";
+  if (code === "CA") return "Canada";
+  return code;
+}
+
+function placeLine(city: string | null, state: string | null): string | null {
+  const parts = [city, state].map((part) => part?.trim()).filter(Boolean);
+  return parts.length > 0 ? parts.join(", ") : null;
 }
 
 const btnBase =
@@ -79,23 +113,91 @@ export function RateQuoteEstimator({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<QuotesResponse | null>(null);
   const [picked, setPicked] = useState<RateQuote | null>(null);
+  const [addressCheck, setAddressCheck] = useState<AddressCheck | null>(null);
+  const [step, setStep] = useState<"check" | "confirm" | "quotes">("check");
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  /** Address confirmed for this dialog. Undefined means the saved ship-to. */
+  const [quoteDestination, setQuoteDestination] = useState<
+    SuggestedAddress | undefined
+  >(undefined);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const fetchQuotes = useCallback(async () => {
+  const fetchQuotes = useCallback(
+    async (destination?: SuggestedAddress) => {
+      const token = getAccessToken();
+      if (!token) {
+        setError("Not signed in.");
+        return;
+      }
+      setStep("quotes");
+      setLoading(true);
+      setError(null);
+      setResult(null);
+      setPicked(null);
+      setAddressCheck(null);
+      setQuoteDestination(destination);
+      try {
+        const res = await fetch(`${apiBase}/carrier-rates/quotes`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            deliveryNoteId,
+            ...(destination
+              ? {
+                  destination: {
+                    city: destination.city ?? undefined,
+                    stateOrProvinceCode: destination.state,
+                    postalCode: destination.postalCode,
+                    countryCode: destination.countryCode,
+                  },
+                }
+              : {}),
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as Partial<QuotesResponse> & {
+          message?: string | string[];
+        };
+        if (!res.ok) {
+          setError(messageOf(data.message) ?? "Could not fetch rate estimates.");
+          return;
+        }
+        setResult({
+          quotes: Array.isArray(data.quotes) ? data.quotes : [],
+          notices: Array.isArray(data.notices) ? data.notices : [],
+          packageCount: data.packageCount ?? 0,
+          deliveryNoteCount: data.deliveryNoteCount ?? 0,
+          dnNumbers: Array.isArray(data.dnNumbers) ? data.dnNumbers : [],
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Request failed.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [deliveryNoteId],
+  );
+
+  const checkAddress = useCallback(async () => {
     const token = getAccessToken();
     if (!token) {
       setError("Not signed in.");
+      setLoading(false);
       return;
     }
+    setStep("check");
     setLoading(true);
     setError(null);
     setResult(null);
     setPicked(null);
+    setAddressCheck(null);
     try {
-      const res = await fetch(`${apiBase}/carrier-rates/quotes`, {
+      const res = await fetch(`${apiBase}/carrier-rates/address-check`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -103,34 +205,43 @@ export function RateQuoteEstimator({
         },
         body: JSON.stringify({ deliveryNoteId }),
       });
-      const data = (await res.json().catch(() => ({}))) as Partial<QuotesResponse> & {
-        message?: string;
+      const data = (await res.json().catch(() => ({}))) as Partial<AddressCheck> & {
+        message?: string | string[];
       };
       if (!res.ok) {
-        setError(
-          typeof data.message === "string" && data.message
-            ? data.message
-            : "Could not fetch rate estimates.",
-        );
+        setError(messageOf(data.message) ?? "Could not check the ship-to address.");
         return;
       }
-      setResult({
-        quotes: Array.isArray(data.quotes) ? data.quotes : [],
-        notices: Array.isArray(data.notices) ? data.notices : [],
-        packageCount: data.packageCount ?? 0,
-        deliveryNoteCount: data.deliveryNoteCount ?? 0,
-        dnNumbers: Array.isArray(data.dnNumbers) ? data.dnNumbers : [],
-      });
+      const check: AddressCheck = {
+        status: data.status === "confirm" || data.status === "blocked" ? data.status : "ready",
+        message: typeof data.message === "string" ? data.message : null,
+        current: data.current ?? {
+          name: null,
+          street: null,
+          city: null,
+          state: null,
+          postalCode: "",
+          countryCode: "",
+        },
+        suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
+      };
+      if (check.status === "ready") {
+        await fetchQuotes(undefined);
+        return;
+      }
+      setSuggestionIndex(0);
+      setStep("confirm");
+      setAddressCheck(check);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed.");
     } finally {
       setLoading(false);
     }
-  }, [deliveryNoteId]);
+  }, [deliveryNoteId, fetchQuotes]);
 
   function openModal() {
     setOpen(true);
-    void fetchQuotes();
+    void checkAddress();
   }
 
   function closeModal() {
@@ -149,6 +260,12 @@ export function RateQuoteEstimator({
     });
     closeModal();
   }
+
+  const confirming = addressCheck != null && !result;
+  const canUseSuggestion =
+    confirming &&
+    addressCheck.status === "confirm" &&
+    addressCheck.suggestions.length > 0;
 
   return (
     <div>
@@ -202,23 +319,30 @@ export function RateQuoteEstimator({
               <div
                 role="dialog"
                 aria-modal="true"
-                aria-label="Shipping rate estimates"
-                className="relative z-10 flex max-h-[min(92dvh,40rem)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-[color:var(--app-border)] bg-[var(--app-surface)] shadow-2xl sm:max-h-[min(88vh,40rem)] sm:rounded-2xl dark:shadow-black/40"
+                aria-label={confirming ? "Check the ship-to address" : "Shipping rate estimates"}
+                className="relative z-10 flex max-h-[min(92dvh,44rem)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-[color:var(--app-border)] bg-[var(--app-surface)] shadow-2xl sm:max-h-[min(88vh,44rem)] sm:rounded-2xl dark:shadow-black/40"
               >
                 <div className="border-b border-[color:var(--app-border)] px-5 py-4">
                   <h2 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-                    Shipping rate estimates
+                    {confirming ? "Check the ship-to address" : "Shipping rate estimates"}
                   </h2>
                   <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                    Live rates from this note&apos;s carrier, sorted by price. Pick one to
-                    attach it to this shipment when you mark it shipped.
+                    {confirming
+                      ? addressCheck.status === "blocked"
+                        ? "A quote needs a postal code and a country on the ship-to."
+                        : addressCheck.suggestions.length === 0
+                          ? "No city or state can be suggested for this postal code. You can still estimate with the address as entered. The customer ship-to is not changed."
+                          : "The postal code does not match the city and state on this note. Choose which address to quote. The customer ship-to is not changed."
+                      : "Live rates from this note's carrier, sorted by price. Pick one to attach it to this shipment when you mark it shipped."}
                   </p>
                 </div>
 
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
                   {loading ? (
                     <p className="text-sm text-slate-500 dark:text-slate-400">
-                      Fetching live rates…
+                      {step === "quotes"
+                        ? "Fetching live rates…"
+                        : "Checking the ship-to address…"}
                     </p>
                   ) : error ? (
                     <p
@@ -227,6 +351,12 @@ export function RateQuoteEstimator({
                     >
                       {error}
                     </p>
+                  ) : confirming ? (
+                    <AddressConfirm
+                      check={addressCheck}
+                      suggestionIndex={suggestionIndex}
+                      onSelectSuggestion={setSuggestionIndex}
+                    />
                   ) : result ? (
                     <>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -293,15 +423,7 @@ export function RateQuoteEstimator({
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[color:var(--app-border)] px-5 py-4">
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => void fetchQuotes()}
-                    className={`${btnBase} ${btnGhost}`}
-                  >
-                    Refresh
-                  </button>
-                  <div className="flex gap-2">
+                  {confirming ? (
                     <button
                       type="button"
                       disabled={loading}
@@ -310,14 +432,68 @@ export function RateQuoteEstimator({
                     >
                       Cancel
                     </button>
+                  ) : (
                     <button
                       type="button"
-                      disabled={loading || !picked}
-                      onClick={confirmSelection}
-                      className={`${btnBase} ${btnPrimary}`}
+                      disabled={loading}
+                      onClick={() =>
+                        void (step === "quotes"
+                          ? fetchQuotes(quoteDestination)
+                          : checkAddress())
+                      }
+                      className={`${btnBase} ${btnGhost}`}
                     >
-                      Use selected rate
+                      Refresh
                     </button>
+                  )}
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {confirming ? (
+                      <>
+                        {addressCheck.status === "confirm" ? (
+                          <button
+                            type="button"
+                            disabled={loading}
+                            onClick={() => void fetchQuotes(undefined)}
+                            className={`${btnBase} ${btnSecondary}`}
+                          >
+                            Estimate with the address as entered
+                          </button>
+                        ) : null}
+                        {canUseSuggestion ? (
+                          <button
+                            type="button"
+                            disabled={loading}
+                            onClick={() =>
+                              void fetchQuotes(
+                                addressCheck.suggestions[suggestionIndex],
+                              )
+                            }
+                            className={`${btnBase} ${btnPrimary}`}
+                          >
+                            Use this address
+                          </button>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          disabled={loading}
+                          onClick={closeModal}
+                          className={`${btnBase} ${btnGhost} px-4`}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={loading || !picked}
+                          onClick={confirmSelection}
+                          className={`${btnBase} ${btnPrimary}`}
+                        >
+                          Use selected rate
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -325,6 +501,129 @@ export function RateQuoteEstimator({
             document.body,
           )
         : null}
+    </div>
+  );
+}
+
+function messageOf(message: string | string[] | undefined): string | null {
+  if (typeof message === "string" && message) return message;
+  if (Array.isArray(message) && message.length > 0) return message.join(" ");
+  return null;
+}
+
+function AddressConfirm({
+  check,
+  suggestionIndex,
+  onSelectSuggestion,
+}: {
+  check: AddressCheck;
+  suggestionIndex: number;
+  onSelectSuggestion: (index: number) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {check.message ? (
+        <p
+          role="status"
+          className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+        >
+          {check.message}
+        </p>
+      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <AddressCard title="Address on the note" address={check.current} />
+        {check.suggestions.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 px-3 py-2.5 dark:border-slate-600">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Suggested address
+            </p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              No suggestion for this postal code.
+            </p>
+          </div>
+        ) : check.suggestions.length === 1 ? (
+          <AddressCard
+            title="Suggested address"
+            address={check.suggestions[0]}
+            emphasized
+          />
+        ) : (
+          <fieldset className="space-y-2">
+            <legend className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Suggested addresses
+            </legend>
+            {check.suggestions.map((suggestion, index) => {
+              const selected = index === suggestionIndex;
+              return (
+                <label
+                  key={`${suggestion.state}-${suggestion.city ?? ""}-${index}`}
+                  className={`flex cursor-pointer gap-2 rounded-xl border px-3 py-2.5 ${
+                    selected
+                      ? "border-slate-900 bg-slate-900/[0.04] dark:border-slate-100 dark:bg-slate-100/[0.06]"
+                      : "border-slate-200/90 bg-white dark:border-slate-700/80 dark:bg-slate-950/50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="suggested-address"
+                    className="mt-1"
+                    checked={selected}
+                    onChange={() => onSelectSuggestion(index)}
+                  />
+                  <AddressLines address={suggestion} />
+                </label>
+              );
+            })}
+          </fieldset>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AddressCard({
+  title,
+  address,
+  emphasized,
+}: {
+  title: string;
+  address: AddressView | SuggestedAddress;
+  emphasized?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-xl border px-3 py-2.5 ${
+        emphasized
+          ? "border-slate-900 bg-slate-900/[0.04] dark:border-slate-100 dark:bg-slate-100/[0.06]"
+          : "border-slate-200/90 bg-white dark:border-slate-700/80 dark:bg-slate-950/50"
+      }`}
+    >
+      <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {title}
+      </p>
+      <div className="mt-1">
+        <AddressLines address={address} />
+      </div>
+    </div>
+  );
+}
+
+function AddressLines({
+  address,
+}: {
+  address: AddressView | SuggestedAddress;
+}) {
+  const named = "name" in address ? address : null;
+  const cityState = placeLine(address.city, address.state);
+  return (
+    <div className="text-sm leading-relaxed text-slate-800 dark:text-slate-100">
+      {named?.name ? <p className="font-medium">{named.name}</p> : null}
+      {named?.street ? <p>{named.street}</p> : null}
+      {cityState ? <p>{cityState}</p> : null}
+      <p>
+        {address.postalCode || "No postal code"}
+        {address.countryCode ? ` · ${countryLabel(address.countryCode)}` : ""}
+      </p>
     </div>
   );
 }

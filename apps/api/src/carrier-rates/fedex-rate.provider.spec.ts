@@ -83,6 +83,19 @@ describe('FedExRateProvider', () => {
     expect(calls[1].url).toBe(
       'https://apis-sandbox.fedex.com/rate/v1/rates/quotes',
     );
+    const body = JSON.parse(String(calls[1].init?.body));
+    expect(body.requestedShipment.customsClearanceDetail).toMatchObject({
+      dutiesPayment: { paymentType: 'SENDER' },
+      commodities: [
+        {
+          description: 'Industrial control equipment',
+          countryOfManufacture: 'CA',
+          quantity: 1,
+          weight: { units: 'LB', value: 10.5 },
+          customsValue: { amount: 1, currency: 'USD' },
+        },
+      ],
+    });
     expect(quotes).toHaveLength(2);
     expect(quotes[0]).toMatchObject({
       carrierCode: 'FEDEX',
@@ -94,6 +107,76 @@ describe('FedExRateProvider', () => {
       estimatedDelivery: '2026-10-05',
     });
     expect(quotes[1].transitDays).toBeNull();
+  });
+
+  it('uses the US-dollar preferred price when FedEx also returns another currency', async () => {
+    mockFetchSequence([
+      jsonResponse({ access_token: 'tok', expires_in: 3600 }),
+      jsonResponse({
+        output: {
+          rateReplyDetails: [
+            {
+              serviceType: 'INTERNATIONAL_ECONOMY',
+              serviceName: 'FedEx International Economy',
+              ratedShipmentDetails: [
+                {
+                  rateType: 'ACCOUNT',
+                  totalNetCharge: 527.13,
+                  currency: 'PLN',
+                },
+                {
+                  rateType: 'PREFERRED_CURRENCY',
+                  totalNetCharge: 134.42,
+                  currency: 'USD',
+                },
+              ],
+            },
+            {
+              serviceType: 'FEDEX_GROUND',
+              serviceName: 'FedEx International Ground',
+              ratedShipmentDetails: [
+                { rateType: 'ACCOUNT', totalNetCharge: 53.95, currency: 'CAD' },
+                {
+                  rateType: 'PREFERRED_CURRENCY',
+                  totalNetCharge: 37.82,
+                  currency: 'USD',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    ]);
+    const quotes = await new FedExRateProvider().getQuotes(REQUEST, CREDS);
+    expect(quotes).toEqual([
+      expect.objectContaining({
+        serviceCode: 'INTERNATIONAL_ECONOMY',
+        totalCharge: 134.42,
+        currency: 'USD',
+      }),
+      expect.objectContaining({
+        serviceCode: 'FEDEX_GROUND',
+        totalCharge: 37.82,
+        currency: 'USD',
+      }),
+    ]);
+  });
+
+  it('omits customs clearance for a domestic quote', async () => {
+    const calls = mockFetchSequence([
+      jsonResponse({ access_token: 'tok', expires_in: 3600 }),
+      jsonResponse({ output: { rateReplyDetails: [] } }),
+    ]);
+    const provider = new FedExRateProvider();
+    await provider.getQuotes(
+      {
+        ...REQUEST,
+        destination: { postalCode: 'M5V2T6', countryCode: 'CA' },
+      },
+      CREDS,
+    );
+    const body = JSON.parse(String(calls[1].init?.body));
+    expect(body.requestedShipment.customsClearanceDetail).toBeUndefined();
   });
 
   it('reuses the cached token for a second quote call', async () => {
@@ -129,7 +212,7 @@ describe('FedExRateProvider', () => {
     expect(calls[0].url).toContain('/oauth/token');
   });
 
-  it('sends shippingChargesPayment with the payor account matching the shipper account', async () => {
+  it('sends the account number without a shipping-charges payor', async () => {
     const calls = mockFetchSequence([
       jsonResponse({ access_token: 'tok', expires_in: 3600 }),
       jsonResponse({ output: { rateReplyDetails: [] } }),
@@ -138,12 +221,12 @@ describe('FedExRateProvider', () => {
     await provider.getQuotes(REQUEST, CREDS);
     const body = JSON.parse(calls[1].init!.body as string);
     expect(body.accountNumber).toEqual({ value: '123456789' });
-    expect(body.requestedShipment.shippingChargesPayment).toEqual({
-      paymentType: 'SENDER',
-      payor: {
-        responsibleParty: { accountNumber: { value: '123456789' } },
-      },
-    });
+    expect(body.requestedShipment.shippingChargesPayment).toBeUndefined();
+    expect(body.requestedShipment.rateRequestType).toEqual([
+      'ACCOUNT',
+      'PREFERRED',
+    ]);
+    expect(body.requestedShipment.preferredCurrency).toBe('USD');
   });
 
   it('omits shippingChargesPayment when no account number is configured', async () => {
@@ -156,7 +239,11 @@ describe('FedExRateProvider', () => {
     const body = JSON.parse(calls[1].init!.body as string);
     expect(body.accountNumber).toBeUndefined();
     expect(body.requestedShipment.shippingChargesPayment).toBeUndefined();
-    expect(body.requestedShipment.rateRequestType).toEqual(['LIST']);
+    expect(body.requestedShipment.rateRequestType).toEqual([
+      'LIST',
+      'PREFERRED',
+    ]);
+    expect(body.requestedShipment.preferredCurrency).toBe('USD');
   });
 
   it('sends the full shipper and recipient addresses (city + state/province)', async () => {
@@ -203,7 +290,12 @@ describe('FedExRateProvider', () => {
     ]);
     const provider = new FedExRateProvider();
     const req: QuoteRequest = {
-      origin: { postalCode: 'V3S6C4', countryCode: 'CA', city: '  ', stateOrProvinceCode: '' },
+      origin: {
+        postalCode: 'V3S6C4',
+        countryCode: 'CA',
+        city: '  ',
+        stateOrProvinceCode: '',
+      },
       destination: { postalCode: '10001', countryCode: 'US' },
       packages: REQUEST.packages,
     };

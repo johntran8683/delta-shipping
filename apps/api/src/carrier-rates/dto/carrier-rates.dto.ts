@@ -12,10 +12,48 @@ import {
 import { Type } from 'class-transformer';
 import type { CarrierCode, CarrierEnvironment } from '../carrier-rate-provider';
 
+/**
+ * Address to quote instead of the saved ship-to. Used only for this request.
+ * The customer ship-to is not updated.
+ */
+export class QuoteDestinationOverrideDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  stateOrProvinceCode?: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(30)
+  postalCode!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(10)
+  countryCode!: string;
+}
+
+/** Check the ship-to postal code before quoting. */
+export class CheckShipToAddressDto {
+  @IsUUID()
+  deliveryNoteId!: string;
+}
+
 /** Request a live rate quote for a delivery note (its shipment group). */
 export class GetRateQuotesDto {
   @IsUUID()
   deliveryNoteId!: string;
+
+  /** When set, FedEx is quoted with this address instead of the saved ship-to. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => QuoteDestinationOverrideDto)
+  destination?: QuoteDestinationOverrideDto;
 }
 
 /** Test carrier credentials — stored ones, or draft values from the form. */

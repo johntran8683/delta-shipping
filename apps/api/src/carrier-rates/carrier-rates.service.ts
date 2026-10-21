@@ -18,6 +18,8 @@ import { PermissionsService } from '../auth/permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptSecret, encryptSecret } from './crypto';
 import { countryCodeFromName } from './country-codes';
+import type { QuoteDestinationOverrideDto } from './dto/carrier-rates.dto';
+import { checkPostalAddress } from './postal-places';
 import { DhlRateProvider } from './dhl-rate.provider';
 import { FedExRateProvider } from './fedex-rate.provider';
 import { UpsRateProvider } from './ups-rate.provider';
@@ -80,6 +82,16 @@ function maskLast4(secret: string): string {
 
 function normalizeCountryCode(raw: string | null | undefined): string {
   return (raw ?? '').trim().toUpperCase();
+}
+
+function joinStreet(
+  street1: string | null | undefined,
+  street2: string | null | undefined,
+): string | null {
+  const parts = [street1, street2]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(', ') : null;
 }
 
 export class CarrierRateProviderRegistry {
@@ -200,9 +212,59 @@ export class CarrierRatesService {
 
   // ------------------------------------------------------------------ quotes
 
+  /**
+   * Postal-code check for the ship-to. A US ZIP or Canadian postal code
+   * supplies the city and state. Nothing is written back to the customer.
+   */
+  async checkAddressForDeliveryNote(
+    deliveryNoteId: string,
+    payload: JwtPayload,
+  ) {
+    await this.assertCanQuote(payload.activeRoleId);
+    const dn = await this.prisma.deliveryNote.findUnique({
+      where: { id: deliveryNoteId },
+      select: {
+        id: true,
+        current_status: true,
+        ship_to_location: {
+          select: {
+            ship_to_name: true,
+            street1: true,
+            street2: true,
+            postal_code: true,
+            country_code: true,
+            country_name: true,
+            city: true,
+            state_region: true,
+          },
+        },
+      },
+    });
+    if (!dn) throw new NotFoundException('Delivery note not found.');
+    if (dn.current_status !== 'SHIPPING_IN_PROGRESS') {
+      throw new BadRequestException(
+        `Rate quotes are only available while shipping is in progress (this note is ${dn.current_status}).`,
+      );
+    }
+    const shipTo = dn.ship_to_location;
+    let countryCode = normalizeCountryCode(shipTo?.country_code);
+    if (!countryCode) {
+      countryCode = countryCodeFromName(shipTo?.country_name) ?? '';
+    }
+    return checkPostalAddress({
+      name: shipTo?.ship_to_name,
+      street: joinStreet(shipTo?.street1, shipTo?.street2),
+      city: shipTo?.city,
+      state: shipTo?.state_region,
+      postalCode: shipTo?.postal_code,
+      countryCode,
+    });
+  }
+
   async getQuotesForDeliveryNote(
     deliveryNoteId: string,
     payload: JwtPayload,
+    destinationOverride?: QuoteDestinationOverrideDto,
   ): Promise<RateQuotesResult> {
     await this.assertCanQuote(payload.activeRoleId);
 
@@ -254,15 +316,33 @@ export class CarrierRatesService {
       );
     }
 
-    const destinationPostal = (dn.ship_to_location?.postal_code ?? '').trim();
-    let destinationCountry = normalizeCountryCode(
-      dn.ship_to_location?.country_code,
-    );
-    if (!destinationCountry) {
-      // Workbooks with a "Country" name column but no code column leave the
-      // code blank — derive it from the name so existing notes can be quoted.
-      destinationCountry =
-        countryCodeFromName(dn.ship_to_location?.country_name) ?? '';
+    // An override is the address the shipper confirmed in the estimate dialog.
+    // It is sent to the carrier for this quote only and is not saved.
+    let destinationPostal: string;
+    let destinationCountry: string;
+    let destinationCity: string | undefined;
+    let destinationState: string | undefined;
+    if (destinationOverride) {
+      destinationPostal = destinationOverride.postalCode.trim();
+      destinationCountry = normalizeCountryCode(
+        destinationOverride.countryCode,
+      );
+      destinationCity = destinationOverride.city?.trim() || undefined;
+      destinationState =
+        destinationOverride.stateOrProvinceCode?.trim() || undefined;
+    } else {
+      destinationPostal = (dn.ship_to_location?.postal_code ?? '').trim();
+      destinationCountry = normalizeCountryCode(
+        dn.ship_to_location?.country_code,
+      );
+      if (!destinationCountry) {
+        // Workbooks with a "Country" name column but no code column leave the
+        // code blank — derive it from the name so existing notes can be quoted.
+        destinationCountry =
+          countryCodeFromName(dn.ship_to_location?.country_name) ?? '';
+      }
+      destinationCity = dn.ship_to_location?.city?.trim() || undefined;
+      destinationState = dn.ship_to_location?.state_region?.trim() || undefined;
     }
     if (!destinationPostal || !destinationCountry) {
       const missing = [
@@ -312,8 +392,8 @@ export class CarrierRatesService {
       destination: {
         postalCode: destinationPostal.replace(/\s+/g, ''),
         countryCode: destinationCountry,
-        city: dn.ship_to_location?.city ?? undefined,
-        stateOrProvinceCode: dn.ship_to_location?.state_region ?? undefined,
+        city: destinationCity,
+        stateOrProvinceCode: destinationState,
       },
       packages,
       shipDate: new Date().toISOString().slice(0, 10),
@@ -335,13 +415,42 @@ export class CarrierRatesService {
     }
 
     const notices: string[] = [];
+    if (destinationOverride) {
+      notices.push(
+        'This estimate uses the address you selected. The customer ship-to was not changed.',
+      );
+    }
     let quotes: RateQuote[];
     try {
       quotes = await provider.getQuotes(request, creds);
     } catch (e) {
-      throw new BadRequestException(
-        `${provider.displayName} quote failed: ${(e as Error).message}`,
-      );
+      const message = (e as Error).message ?? '';
+      // FedEx returns ACCOUNT.NUMBER.MISMATCH when the account in Settings
+      // is not the shipping account enrolled on this API project. List rates
+      // do not need that account, so the estimate can still be shown.
+      if (
+        inferred === 'FEDEX' &&
+        creds.accountNumber &&
+        message.includes('ACCOUNT.NUMBER.MISMATCH')
+      ) {
+        try {
+          quotes = await provider.getQuotes(request, {
+            ...creds,
+            accountNumber: null,
+          });
+        } catch (retryError) {
+          throw new BadRequestException(
+            `${provider.displayName} quote failed: ${(retryError as Error).message}`,
+          );
+        }
+        notices.push(
+          'FedEx rejected the account number in Settings → Carrier rates, so these are published list rates. Add that shipping account to the API project in the FedEx Developer Portal.',
+        );
+      } else {
+        throw new BadRequestException(
+          `${provider.displayName} quote failed: ${message}`,
+        );
+      }
     }
     if (quotes.length === 0) {
       notices.push(
@@ -468,7 +577,10 @@ export class CarrierRatesService {
     }
 
     const activeEnvs = await this.readActiveEnvironments();
-    const value = JSON.stringify({ ...activeEnvs, [code]: dto.activeEnvironment });
+    const value = JSON.stringify({
+      ...activeEnvs,
+      [code]: dto.activeEnvironment,
+    });
     await this.prisma.appSetting.upsert({
       where: { key: ACTIVE_ENV_SETTING_KEY },
       create: { key: ACTIVE_ENV_SETTING_KEY, value },

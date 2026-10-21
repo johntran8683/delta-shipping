@@ -34,10 +34,34 @@ interface FedExRateReplyDetail {
   operationalDetail?: {
     transitTime?: string;
   };
-  ratedShipmentDetails?: Array<{
-    totalNetCharge?: number;
-    currency?: string;
-  }>;
+  ratedShipmentDetails?: FedExRatedDetail[];
+}
+
+interface FedExRatedDetail {
+  rateType?: string;
+  totalNetCharge?: number;
+  currency?: string;
+}
+
+/**
+ * Estimates are shown in US dollars. FedEx returns the account currency
+ * first (CAD, or PLN on the sandbox) and, when asked, a second
+ * PREFERRED_CURRENCY row converted to the requested currency.
+ */
+function pickRatedDetail(
+  details: FedExRatedDetail[] | undefined,
+): FedExRatedDetail | undefined {
+  const rates = (details ?? []).filter(
+    (rate) => typeof rate.totalNetCharge === 'number',
+  );
+  return (
+    rates.find(
+      (rate) =>
+        rate.currency === 'USD' && rate.rateType === 'PREFERRED_CURRENCY',
+    ) ??
+    rates.find((rate) => rate.currency === 'USD') ??
+    rates[0]
+  );
 }
 
 function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
@@ -112,6 +136,41 @@ function toFedExAddress(addr: QuoteAddress) {
   return out;
 }
 
+function isInternational(request: QuoteRequest): boolean {
+  return (
+    request.origin.countryCode.trim().toUpperCase() !==
+    request.destination.countryCode.trim().toUpperCase()
+  );
+}
+
+/**
+ * FedEx rejects international rate quotes with
+ * RATE.CUSTOMCLEARANCEDETAIL.INVALID when this object is missing.
+ * A single commodity stands in for the shipment so the transportation
+ * rate can be returned; duty estimates use a nominal customs value
+ * because the delivery note has no commercial invoice on the quote.
+ */
+function customsClearanceDetail(request: QuoteRequest) {
+  const weight = round2(
+    request.packages.reduce((sum, pkg) => sum + pkg.weightLb, 0),
+  );
+  const customsValue = { amount: 1, currency: 'USD' };
+  return {
+    dutiesPayment: { paymentType: 'SENDER' },
+    commodities: [
+      {
+        description: 'Industrial control equipment',
+        countryOfManufacture: request.origin.countryCode.trim().toUpperCase(),
+        quantity: 1,
+        quantityUnits: 'PCS',
+        weight: { units: 'LB', value: Math.max(weight, 0.01) },
+        customsValue,
+        unitPrice: customsValue,
+      },
+    ],
+  };
+}
+
 export class FedExRateProvider implements CarrierRateProvider {
   readonly code = 'FEDEX' as const;
   readonly displayName = 'FedEx';
@@ -175,10 +234,14 @@ export class FedExRateProvider implements CarrierRateProvider {
       recipient: { address: toFedExAddress(request.destination) },
       pickupType: 'USE_SCHEDULED_PICKUP',
       packagingType: 'YOUR_PACKAGING',
-      // FedEx requires the rate type: account-specific rates when an
-      // account number is configured, otherwise list rates.
-      rateRequestType: [creds.accountNumber ? 'ACCOUNT' : 'LIST'],
+      // ACCOUNT (or LIST) is the price FedEx bills. PREFERRED asks for that
+      // same price converted into preferredCurrency, which is USD.
+      rateRequestType: [creds.accountNumber ? 'ACCOUNT' : 'LIST', 'PREFERRED'],
+      preferredCurrency: 'USD',
       requestedPackageLineItems: request.packages.map(toLineItem),
+      ...(isInternational(request)
+        ? { customsClearanceDetail: customsClearanceDetail(request) }
+        : {}),
     };
     const payload: Record<string, unknown> = {
       rateRequestControlParameters: { returnTransitTimes: true },
@@ -186,15 +249,11 @@ export class FedExRateProvider implements CarrierRateProvider {
     };
     if (creds.accountNumber) {
       payload.accountNumber = { value: creds.accountNumber };
-      // FedEx defaults the payment type to SENDER for account rates and
-      // rejects the request (ACCOUNT.NUMBER.MISMATCH) unless the payor
-      // account matches the shipper account number.
-      requestedShipment.shippingChargesPayment = {
-        paymentType: 'SENDER',
-        payor: {
-          responsibleParty: { accountNumber: { value: creds.accountNumber } },
-        },
-      };
+      // Do not also send shippingChargesPayment. FedEx defaults payment to
+      // SENDER and then compares that payor with the account enrolled on the
+      // API project, which is not this accountNumber. Sending the payor
+      // returns ACCOUNT.NUMBER.MISMATCH even when both values are identical.
+      // Account-specific rates come from accountNumber alone.
     }
 
     const res = await fetchWithTimeout(
@@ -226,7 +285,7 @@ export class FedExRateProvider implements CarrierRateProvider {
     const details = json.output?.rateReplyDetails ?? [];
     const quotes: RateQuote[] = [];
     for (const d of details) {
-      const rated = d.ratedShipmentDetails?.[0];
+      const rated = pickRatedDetail(d.ratedShipmentDetails);
       if (typeof rated?.totalNetCharge !== 'number') continue;
       quotes.push({
         carrierCode: 'FEDEX',

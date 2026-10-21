@@ -207,9 +207,231 @@ describe('CarrierRatesService', () => {
     expect(result.quotes).toHaveLength(1);
     expect(bodies.some((b) => b.includes('"countryCode":"US"'))).toBe(true);
     // FedEx requires the rate type: ACCOUNT when an account number is set.
-    expect(bodies.some((b) => b.includes('"rateRequestType":["ACCOUNT"]'))).toBe(
-      true,
+    expect(
+      bodies.some((b) =>
+        b.includes('"rateRequestType":["ACCOUNT","PREFERRED"]'),
+      ),
+    ).toBe(true);
+  });
+
+  it('falls back to FedEx list rates when the account number is rejected', async () => {
+    const { service, prisma, permissions } = buildService();
+    permissions.roleHasPermission.mockResolvedValue(true);
+    prisma.deliveryNote.findUnique.mockResolvedValue({
+      id: 'dn-1',
+      dn_number: 'DN-1',
+      current_status: 'SHIPPING_IN_PROGRESS',
+      shipping_group_id: null,
+      shipping_type: 'FedEx Ground',
+      ship_to_location: {
+        postal_code: '10001',
+        country_code: 'US',
+        city: 'New York',
+        state_region: 'NY',
+      },
+    });
+    prisma.appSetting.findUnique.mockImplementation(
+      async ({ where }: { where: { key: string } }) => {
+        if (where.key === 'rate_quote_origin') {
+          return {
+            value: JSON.stringify({ postalCode: 'V3S 1A1', countryCode: 'CA' }),
+          };
+        }
+        return null;
+      },
     );
+    prisma.carrierRateConfig.findUnique.mockResolvedValue({
+      client_id: 'fcid',
+      client_secret_enc: encryptSecret('fsecret'),
+      account_number: '999',
+      is_enabled: true,
+    });
+    prisma.packSessionDeliveryNote.findMany.mockResolvedValue([
+      { pack_session_id: 'ps-1' },
+    ]);
+    prisma.packBox.findMany.mockResolvedValue([
+      { weight_lb: '10', length_in: '15', width_in: '15', height_in: '12' },
+    ]);
+    const bodies: string[] = [];
+    global.fetch = jest.fn(async (url: unknown, init?: { body?: unknown }) => {
+      if (String(url).includes('/oauth/token')) {
+        return jsonResponse({ access_token: 'tok', expires_in: 3600 });
+      }
+      const body = String(init?.body ?? '');
+      bodies.push(body);
+      if (body.includes('"accountNumber"')) {
+        return jsonResponse(
+          {
+            errors: [
+              { code: 'ACCOUNT.NUMBER.MISMATCH', message: 'GENERIC.ERROR' },
+            ],
+          },
+          400,
+        );
+      }
+      return jsonResponse({
+        output: {
+          rateReplyDetails: [
+            {
+              serviceType: 'INTERNATIONAL_ECONOMY',
+              serviceName: 'FedEx International Economy',
+              ratedShipmentDetails: [
+                { totalNetCharge: 120.5, currency: 'USD' },
+              ],
+            },
+          ],
+        },
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await service.getQuotesForDeliveryNote('dn-1', payload);
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toContain('"rateRequestType":["ACCOUNT","PREFERRED"]');
+    expect(bodies[1]).toContain('"rateRequestType":["LIST","PREFERRED"]');
+    expect(bodies[1]).not.toContain('"accountNumber"');
+    expect(result.quotes).toEqual([
+      expect.objectContaining({
+        serviceCode: 'INTERNATIONAL_ECONOMY',
+        totalCharge: 120.5,
+      }),
+    ]);
+    expect(result.notices[0]).toMatch(/published list rates/);
+  });
+
+  it('asks before quoting a US ship-to whose postal code is not a ZIP', async () => {
+    const { service, prisma, permissions } = buildService();
+    permissions.roleHasPermission.mockResolvedValue(true);
+    prisma.deliveryNote.findUnique.mockResolvedValue({
+      id: 'dn-1',
+      dn_number: 'DN-1',
+      current_status: 'SHIPPING_IN_PROGRESS',
+      shipping_group_id: null,
+      shipping_type: 'FedEx INTL Economy',
+      ship_to_location: {
+        ship_to_name: 'SOUTHLAND INDUSTRIES',
+        street1: 'UNIT 1, 19-25 DUERDIN STREET',
+        street2: null,
+        postal_code: '3168',
+        country_code: 'US',
+        country_name: 'United States',
+        city: null,
+        state_region: 'NV',
+      },
+    });
+
+    const check = await service.checkAddressForDeliveryNote('dn-1', payload);
+
+    expect(check.status).toBe('confirm');
+    expect(check.suggestions).toEqual([]);
+    expect(check.message).toMatch(/not a United States ZIP code/);
+    expect(check.message).not.toMatch(/Australia|Kenya/);
+    expect(check.current.street).toBe('UNIT 1, 19-25 DUERDIN STREET');
+  });
+
+  it('suggests the city and state for a ZIP that does not match the ship-to', async () => {
+    const { service, prisma, permissions } = buildService();
+    permissions.roleHasPermission.mockResolvedValue(true);
+    prisma.deliveryNote.findUnique.mockResolvedValue({
+      id: 'dn-1',
+      current_status: 'SHIPPING_IN_PROGRESS',
+      ship_to_location: {
+        ship_to_name: 'Example',
+        street1: '1 Main',
+        street2: null,
+        postal_code: '44141',
+        country_code: 'US',
+        country_name: 'United States',
+        city: 'Bozeman',
+        state_region: 'MT',
+      },
+    });
+
+    const check = await service.checkAddressForDeliveryNote('dn-1', payload);
+
+    expect(check.status).toBe('confirm');
+    expect(check.suggestions).toEqual([
+      {
+        city: 'Brecksville',
+        state: 'OH',
+        postalCode: '44141',
+        countryCode: 'US',
+      },
+    ]);
+    expect(check.message).toMatch(/Brecksville, OH/);
+  });
+
+  it('quotes the selected address and does not change the ship-to', async () => {
+    const { service, prisma, permissions } = buildService();
+    permissions.roleHasPermission.mockResolvedValue(true);
+    prisma.deliveryNote.findUnique.mockResolvedValue({
+      id: 'dn-1',
+      dn_number: 'DN-1',
+      current_status: 'SHIPPING_IN_PROGRESS',
+      shipping_group_id: null,
+      shipping_type: 'FedEx Ground',
+      ship_to_location: {
+        postal_code: '44141',
+        country_code: 'US',
+        city: 'Bozeman',
+        state_region: 'MT',
+      },
+    });
+    prisma.appSetting.findUnique.mockImplementation(
+      async ({ where }: { where: { key: string } }) =>
+        where.key === 'rate_quote_origin'
+          ? {
+              value: JSON.stringify({
+                postalCode: 'V3S 1A1',
+                countryCode: 'CA',
+              }),
+            }
+          : null,
+    );
+    prisma.carrierRateConfig.findUnique.mockResolvedValue({
+      client_id: 'fcid',
+      client_secret_enc: encryptSecret('fsecret'),
+      account_number: '999',
+      is_enabled: true,
+    });
+    prisma.packSessionDeliveryNote.findMany.mockResolvedValue([
+      { pack_session_id: 'ps-1' },
+    ]);
+    prisma.packBox.findMany.mockResolvedValue([
+      { weight_lb: '10', length_in: '15', width_in: '15', height_in: '12' },
+    ]);
+    const bodies: string[] = [];
+    global.fetch = jest.fn(async (url: unknown, init?: { body?: unknown }) => {
+      if (String(url).includes('/oauth/token')) {
+        return jsonResponse({ access_token: 'ftok', expires_in: 3600 });
+      }
+      bodies.push(String(init?.body ?? ''));
+      return jsonResponse({
+        output: {
+          rateReplyDetails: [
+            {
+              serviceType: 'FEDEX_GROUND',
+              serviceName: 'FedEx Ground',
+              ratedShipmentDetails: [{ totalNetCharge: 40, currency: 'USD' }],
+            },
+          ],
+        },
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await service.getQuotesForDeliveryNote('dn-1', payload, {
+      city: 'Brecksville',
+      stateOrProvinceCode: 'OH',
+      postalCode: '44141',
+      countryCode: 'US',
+    });
+
+    expect(bodies[0]).toContain('"city":"Brecksville"');
+    expect(bodies[0]).toContain('"stateOrProvinceCode":"OH"');
+    expect(bodies[0]).not.toContain('Bozeman');
+    expect(bodies[0]).not.toContain('"stateOrProvinceCode":"MT"');
+    expect(result.notices[0]).toMatch(/customer ship-to was not changed/);
+    expect(prisma.deliveryNote.update).toBeUndefined();
   });
 
   it('names the missing address field in the quote error', async () => {
@@ -570,10 +792,18 @@ describe('CarrierRatesService', () => {
       where: { key: 'rate_quote_active_env' },
       create: {
         key: 'rate_quote_active_env',
-        value: JSON.stringify({ FEDEX: 'SANDBOX', UPS: 'SANDBOX', DHL: 'SANDBOX' }),
+        value: JSON.stringify({
+          FEDEX: 'SANDBOX',
+          UPS: 'SANDBOX',
+          DHL: 'SANDBOX',
+        }),
       },
       update: {
-        value: JSON.stringify({ FEDEX: 'SANDBOX', UPS: 'SANDBOX', DHL: 'SANDBOX' }),
+        value: JSON.stringify({
+          FEDEX: 'SANDBOX',
+          UPS: 'SANDBOX',
+          DHL: 'SANDBOX',
+        }),
       },
     });
     // Enabled sandbox env is upserted with an encrypted secret…
@@ -631,14 +861,15 @@ describe('CarrierRatesService', () => {
       account_number: '111',
       is_enabled: true,
     };
-    prisma.carrierRateConfig.findUnique.mockImplementation((args: {
-      where: { carrier_code_environment: { environment: string } };
-    }) =>
-      Promise.resolve(
-        args.where.carrier_code_environment.environment === 'SANDBOX'
-          ? existing
-          : null,
-      ),
+    prisma.carrierRateConfig.findUnique.mockImplementation(
+      (args: {
+        where: { carrier_code_environment: { environment: string } };
+      }) =>
+        Promise.resolve(
+          args.where.carrier_code_environment.environment === 'SANDBOX'
+            ? existing
+            : null,
+        ),
     );
 
     const dto = carrierDto();
