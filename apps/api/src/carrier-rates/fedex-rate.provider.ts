@@ -11,6 +11,7 @@
 import type {
   CarrierRateCredentials,
   CarrierRateProvider,
+  QuoteAddress,
   QuotePackage,
   QuoteRequest,
   RateQuote,
@@ -93,6 +94,24 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * FedEx rates Ground services by the recipient's state/province and its
+ * documented request shape includes city + stateOrProvinceCode on both
+ * addresses. The service layer already collects them — send them, omitting
+ * any that are blank (empty strings fail FedEx validation on their own).
+ */
+function toFedExAddress(addr: QuoteAddress) {
+  const out: Record<string, string> = {
+    postalCode: addr.postalCode,
+    countryCode: addr.countryCode,
+  };
+  const city = (addr.city ?? '').trim();
+  if (city) out.city = city;
+  const state = (addr.stateOrProvinceCode ?? '').trim();
+  if (state) out.stateOrProvinceCode = state;
+  return out;
+}
+
 export class FedExRateProvider implements CarrierRateProvider {
   readonly code = 'FEDEX' as const;
   readonly displayName = 'FedEx';
@@ -152,18 +171,8 @@ export class FedExRateProvider implements CarrierRateProvider {
     }
     const token = await this.getAccessToken(creds);
     const requestedShipment: Record<string, unknown> = {
-      shipper: {
-        address: {
-          postalCode: request.origin.postalCode,
-          countryCode: request.origin.countryCode,
-        },
-      },
-      recipient: {
-        address: {
-          postalCode: request.destination.postalCode,
-          countryCode: request.destination.countryCode,
-        },
-      },
+      shipper: { address: toFedExAddress(request.origin) },
+      recipient: { address: toFedExAddress(request.destination) },
       pickupType: 'USE_SCHEDULED_PICKUP',
       packagingType: 'YOUR_PACKAGING',
       // FedEx requires the rate type: account-specific rates when an

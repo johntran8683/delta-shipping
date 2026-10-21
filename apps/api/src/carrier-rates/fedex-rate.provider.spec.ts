@@ -158,4 +158,64 @@ describe('FedExRateProvider', () => {
     expect(body.requestedShipment.shippingChargesPayment).toBeUndefined();
     expect(body.requestedShipment.rateRequestType).toEqual(['LIST']);
   });
+
+  it('sends the full shipper and recipient addresses (city + state/province)', async () => {
+    const calls = mockFetchSequence([
+      jsonResponse({ access_token: 'tok', expires_in: 3600 }),
+      jsonResponse({ output: { rateReplyDetails: [] } }),
+    ]);
+    const provider = new FedExRateProvider();
+    const req: QuoteRequest = {
+      origin: {
+        postalCode: 'V3S6C4',
+        countryCode: 'CA',
+        city: 'Surrey',
+        stateOrProvinceCode: 'BC',
+      },
+      destination: {
+        postalCode: '10001',
+        countryCode: 'US',
+        city: 'New York',
+        stateOrProvinceCode: 'NY',
+      },
+      packages: REQUEST.packages,
+    };
+    await provider.getQuotes(req, CREDS);
+    const body = JSON.parse(calls[1].init!.body as string);
+    expect(body.requestedShipment.shipper.address).toEqual({
+      postalCode: 'V3S6C4',
+      countryCode: 'CA',
+      city: 'Surrey',
+      stateOrProvinceCode: 'BC',
+    });
+    expect(body.requestedShipment.recipient.address).toEqual({
+      postalCode: '10001',
+      countryCode: 'US',
+      city: 'New York',
+      stateOrProvinceCode: 'NY',
+    });
+  });
+
+  it('omits city and stateOrProvinceCode when they are blank', async () => {
+    const calls = mockFetchSequence([
+      jsonResponse({ access_token: 'tok', expires_in: 3600 }),
+      jsonResponse({ output: { rateReplyDetails: [] } }),
+    ]);
+    const provider = new FedExRateProvider();
+    const req: QuoteRequest = {
+      origin: { postalCode: 'V3S6C4', countryCode: 'CA', city: '  ', stateOrProvinceCode: '' },
+      destination: { postalCode: '10001', countryCode: 'US' },
+      packages: REQUEST.packages,
+    };
+    await provider.getQuotes(req, CREDS);
+    const body = JSON.parse(calls[1].init!.body as string);
+    expect(body.requestedShipment.shipper.address).toEqual({
+      postalCode: 'V3S6C4',
+      countryCode: 'CA',
+    });
+    expect(body.requestedShipment.recipient.address).toEqual({
+      postalCode: '10001',
+      countryCode: 'US',
+    });
+  });
 });
