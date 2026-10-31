@@ -65,6 +65,7 @@ export class CustomersService {
             select: {
               customer_carrier_accounts: true,
               ship_to_locations: true,
+              delivery_notes: true,
             },
           },
         },
@@ -84,6 +85,7 @@ export class CustomersService {
         updated_at: c.updated_at,
         carrier_account_count: c._count.customer_carrier_accounts,
         ship_to_count: c._count.ship_to_locations,
+        delivery_note_count: c._count.delivery_notes,
       })),
       page,
       pageSize,

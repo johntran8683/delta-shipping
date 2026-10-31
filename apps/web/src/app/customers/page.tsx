@@ -17,9 +17,11 @@ type CustomerListItem = {
   fed_id_number: string | null;
   default_contact_name: string | null;
   default_phone: string | null;
+  default_email: string | null;
   is_active: boolean;
   carrier_account_count: number;
   ship_to_count: number;
+  delivery_note_count: number;
 };
 
 type ListResponse = {
@@ -118,7 +120,7 @@ export default function CustomersListPage() {
       title="Customers"
       subtitle="Customer profiles and courier (carrier) accounts"
     >
-      <div className="mx-auto max-w-5xl space-y-4">
+      <div className="space-y-4">
         {permHint ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-100">
             {permHint}
@@ -175,7 +177,7 @@ export default function CustomersListPage() {
 
         {loading ? (
           <div
-            className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950"
+            className="overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-950/[0.03] dark:border-slate-800 dark:bg-slate-950/80 dark:ring-white/[0.04]"
             role="status"
             aria-label="Loading customers"
           >
@@ -198,23 +200,45 @@ export default function CustomersListPage() {
               {data.total} customer{data.total === 1 ? "" : "s"}
               {appliedQ.trim() ? ` matching “${appliedQ.trim()}”` : ""}
             </p>
-            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-              <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Sold-to</th>
-                    <th className="px-3 py-2 font-medium">Name</th>
-                    <th className="px-3 py-2 font-medium">Contact</th>
-                    <th className="px-3 py-2 font-medium">Accounts</th>
-                    <th className="px-3 py-2 font-medium">Status</th>
+            <div className="overflow-x-auto rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-950/[0.03] dark:border-slate-800 dark:bg-slate-950/80 dark:ring-white/[0.04]">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/95 text-left dark:border-slate-800 dark:bg-slate-900/80">
+                    <th className="whitespace-nowrap px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                      Sold-to
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                      Name
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                      FED ID #
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                      Contact
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                      Email
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                      Accounts
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                      Ship-to
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                      DNs
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500">
+                      Status
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.items.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={5}
-                        className="px-3 py-8 text-center text-slate-500"
+                        colSpan={9}
+                        className="px-3 py-10 text-center text-sm text-slate-500"
                       >
                         No customers found. Import a Shipping IDs file or wait
                         for DN import upserts.
@@ -225,9 +249,9 @@ export default function CustomersListPage() {
                       <tr
                         key={c.id}
                         onClick={() => router.push(`/customers/${c.id}`)}
-                        className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900"
+                        className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50/90 dark:border-slate-800/80 dark:hover:bg-slate-900/40"
                       >
-                        <td className="px-3 py-2 font-mono text-xs">
+                        <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs">
                           <Link
                             href={`/customers/${c.id}`}
                             className="text-[var(--app-accent)] underline-offset-2 hover:underline"
@@ -235,7 +259,7 @@ export default function CustomersListPage() {
                             {c.sold_to_code}
                           </Link>
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-1.5">
                           <Link
                             href={`/customers/${c.id}`}
                             className="font-medium text-slate-900 hover:underline dark:text-slate-100"
@@ -243,7 +267,10 @@ export default function CustomersListPage() {
                             {c.sold_to_name}
                           </Link>
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs text-slate-600 dark:text-slate-400">
+                          {c.fed_id_number || "—"}
+                        </td>
+                        <td className="px-3 py-1.5">
                           {c.default_contact_name ? (
                             <div className="text-slate-900 dark:text-slate-100">
                               {c.default_contact_name}
@@ -260,10 +287,22 @@ export default function CustomersListPage() {
                             </span>
                           ) : null}
                         </td>
-                        <td className="px-3 py-2 tabular-nums">
+                        <td
+                          className="max-w-[18rem] truncate px-3 py-1.5 text-slate-600 dark:text-slate-400"
+                          title={c.default_email ?? undefined}
+                        >
+                          {c.default_email || "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-1.5 tabular-nums">
                           {c.carrier_account_count}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="whitespace-nowrap px-3 py-1.5 tabular-nums">
+                          {c.ship_to_count}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-1.5 tabular-nums">
+                          {c.delivery_note_count}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-1.5">
                           <CustomerActiveBadge active={c.is_active} />
                         </td>
                       </tr>

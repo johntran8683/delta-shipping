@@ -349,7 +349,7 @@ export default function CustomerDetailPage() {
           : "Customer profile and courier accounts"
       }
     >
-      <div className="mx-auto max-w-3xl space-y-6">
+      <div className="mx-auto max-w-6xl space-y-4">
         <Link
           href="/customers"
           className="inline-block text-sm text-[var(--app-accent)] hover:underline"
@@ -391,7 +391,9 @@ export default function CustomerDetailPage() {
               </div>
             </section>
 
-            <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-950">
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+              <div className="space-y-4">
+            <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
                 Profile
               </h2>
@@ -407,7 +409,7 @@ export default function CustomerDetailPage() {
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                       Identity
                     </h3>
-                    <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    <div className="mt-2 grid grid-cols-2 gap-3">
                       <label className={labelClass}>
                         Sold-to code
                         <input
@@ -452,7 +454,7 @@ export default function CustomerDetailPage() {
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                       Contact
                     </h3>
-                    <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    <div className="mt-2 grid grid-cols-2 gap-3">
                       <label className={labelClass}>
                         Contact
                         <input
@@ -482,7 +484,7 @@ export default function CustomerDetailPage() {
                         />
                       </label>
                       <label
-                        className={labelClass + " sm:col-span-2"}
+                        className={labelClass + " col-span-2"}
                       >
                         Email
                         <input
@@ -555,9 +557,8 @@ export default function CustomerDetailPage() {
                     Require box contents when packing
                   </label>
                   <p className="mt-1 text-xs text-slate-500">
-                    When on, the packer must record which items are in each box
-                    and the quantities must add up to the delivery note lines.
-                    Used for customs packing lists.
+                    When on, packers must record box contents for customs
+                    packing lists.
                   </p>
                 </div>
                 {canManageBoxContentFlag ? (
@@ -578,8 +579,9 @@ export default function CustomerDetailPage() {
                 )}
               </div>
             </section>
+              </div>
 
-            <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-950">
+            <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
                 Courier accounts
               </h2>
@@ -588,7 +590,7 @@ export default function CustomerDetailPage() {
                 instead of deleting.
               </p>
 
-              <ul className="mt-4 space-y-3">
+              <ul className="mt-3 space-y-2">
                 {detail.carrier_accounts.length === 0 ? (
                   <li className="text-sm text-slate-500">
                     No courier accounts on file.
@@ -597,7 +599,7 @@ export default function CustomerDetailPage() {
                   detail.carrier_accounts.map((a) => (
                     <li
                       key={a.id}
-                      className="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700"
+                      className="rounded-lg border border-slate-200 px-3 py-1.5 dark:border-slate-700"
                     >
                       {editingAccountId === a.id && canWrite ? (
                         <div className="space-y-2">
@@ -789,6 +791,7 @@ export default function CustomerDetailPage() {
                 </form>
               ) : null}
             </section>
+            </div>
           </>
         ) : null}
       </div>
