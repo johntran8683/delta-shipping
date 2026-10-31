@@ -8,6 +8,7 @@ import { clearSession, getAccessToken } from "@/lib/auth-storage";
 import { formatApiErrorPayload } from "@/lib/api-error";
 import { apiBase } from "@/lib/config";
 import { canSeeCustomersNav } from "@/lib/import-access";
+import { CustomerActiveBadge } from "@/components/customer-active-badge";
 
 type CustomerListItem = {
   id: string;
@@ -150,6 +151,19 @@ export default function CustomersListPage() {
             >
               Search
             </button>
+            {query || appliedQ ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery("");
+                  setAppliedQ("");
+                  setPage(1);
+                }}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm dark:border-slate-600"
+              >
+                Clear
+              </button>
+            ) : null}
           </form>
         ) : null}
 
@@ -160,7 +174,22 @@ export default function CustomersListPage() {
         ) : null}
 
         {loading ? (
-          <p className="text-sm text-slate-500">Loading customers…</p>
+          <div
+            className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950"
+            role="status"
+            aria-label="Loading customers"
+          >
+            <span className="sr-only">Loading customers…</span>
+            <div className="space-y-3 p-4">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="h-4 w-16 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+                  <div className="h-4 flex-1 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+                  <div className="h-4 w-24 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+                </div>
+              ))}
+            </div>
+          </div>
         ) : null}
 
         {!loading && !permHint && data ? (
@@ -195,7 +224,8 @@ export default function CustomersListPage() {
                     data.items.map((c) => (
                       <tr
                         key={c.id}
-                        className="border-b border-slate-100 last:border-0 dark:border-slate-800"
+                        onClick={() => router.push(`/customers/${c.id}`)}
+                        className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900"
                       >
                         <td className="px-3 py-2 font-mono text-xs">
                           <Link
@@ -213,20 +243,28 @@ export default function CustomersListPage() {
                             {c.sold_to_name}
                           </Link>
                         </td>
-                        <td className="px-3 py-2 text-slate-600 dark:text-slate-400">
-                          {c.default_contact_name || c.default_phone || "—"}
+                        <td className="px-3 py-2">
+                          {c.default_contact_name ? (
+                            <div className="text-slate-900 dark:text-slate-100">
+                              {c.default_contact_name}
+                            </div>
+                          ) : null}
+                          {c.default_phone ? (
+                            <div className="text-slate-600 dark:text-slate-400">
+                              {c.default_phone}
+                            </div>
+                          ) : null}
+                          {!c.default_contact_name && !c.default_phone ? (
+                            <span className="text-slate-600 dark:text-slate-400">
+                              —
+                            </span>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2 tabular-nums">
                           {c.carrier_account_count}
                         </td>
                         <td className="px-3 py-2">
-                          {c.is_active ? (
-                            <span className="text-emerald-700 dark:text-emerald-400">
-                              Active
-                            </span>
-                          ) : (
-                            <span className="text-slate-500">Inactive</span>
-                          )}
+                          <CustomerActiveBadge active={c.is_active} />
                         </td>
                       </tr>
                     ))
@@ -245,7 +283,12 @@ export default function CustomersListPage() {
                   Previous
                 </button>
                 <span className="text-slate-600 dark:text-slate-400">
-                  Page {data.page} of {data.totalPages}
+                  Showing{" "}
+                  {data.total === 0
+                    ? 0
+                    : (data.page - 1) * data.pageSize + 1}
+                  –{Math.min(data.page * data.pageSize, data.total)} of{" "}
+                  {data.total} · Page {data.page} of {data.totalPages}
                 </span>
                 <button
                   type="button"

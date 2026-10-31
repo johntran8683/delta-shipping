@@ -9,6 +9,7 @@ import { clearSession, getAccessToken, getActiveRoleCode } from "@/lib/auth-stor
 import { formatApiErrorPayload } from "@/lib/api-error";
 import { apiBase } from "@/lib/config";
 import { canSeeCustomersNav, canWriteCustomers, canManageBoxContent } from "@/lib/import-access";
+import { CustomerActiveBadge } from "@/components/customer-active-badge";
 
 type CarrierAccount = {
   id: string;
@@ -59,6 +60,8 @@ export default function CustomerDetailPage() {
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [profile, setProfile] = useState(emptyProfile);
   const [savedOk, setSavedOk] = useState(false);
+  /** Account id whose Copy button briefly shows "Copied". */
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   /** Per-customer box-content requirement (packing list for customs). */
   const [boxContent, setBoxContent] = useState(false);
   const [boxContentSaving, setBoxContentSaving] = useState(false);
@@ -320,9 +323,14 @@ export default function CustomerDetailPage() {
     });
   }
 
-  async function copyText(text: string) {
+  async function copyText(text: string, id: string) {
     try {
       await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      window.setTimeout(
+        () => setCopiedId((cur) => (cur === id ? null : cur)),
+        2000,
+      );
     } catch {
       /* ignore */
     }
@@ -365,7 +373,25 @@ export default function CustomerDetailPage() {
 
         {!loading && detail && !permHint ? (
           <>
-            <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
+            <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                  {detail.sold_to_name}
+                </h2>
+                <p className="mt-0.5 font-mono text-sm text-slate-500">
+                  Sold-to {detail.sold_to_code}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <CustomerActiveBadge active={detail.is_active} />
+                <span className="text-sm text-slate-600 dark:text-slate-400">
+                  {detail.ship_to_count} ship-to · {detail.delivery_note_count}{" "}
+                  DNs
+                </span>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-950">
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
                 Profile
               </h2>
@@ -376,88 +402,104 @@ export default function CustomerDetailPage() {
                   : null}
               </p>
               <form className="mt-4 space-y-3" onSubmit={saveProfile}>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className={labelClass}>
-                    Sold-to code
-                    <input
-                      className={fieldClass + " font-mono"}
-                      value={detail.sold_to_code}
-                      disabled
-                      readOnly
-                    />
-                  </label>
-                  <label className={labelClass}>
-                    Customer name
-                    <input
-                      className={fieldClass}
-                      value={profile.sold_to_name}
-                      disabled={!canWrite}
-                      onChange={(e) =>
-                        setProfile((p) => ({
-                          ...p,
-                          sold_to_name: e.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </label>
-                  <label className={labelClass}>
-                    FED ID #
-                    <input
-                      className={fieldClass + " font-mono"}
-                      value={profile.fed_id_number}
-                      disabled={!canWrite}
-                      onChange={(e) =>
-                        setProfile((p) => ({
-                          ...p,
-                          fed_id_number: e.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={labelClass}>
-                    Contact
-                    <input
-                      className={fieldClass}
-                      value={profile.default_contact_name}
-                      disabled={!canWrite}
-                      onChange={(e) =>
-                        setProfile((p) => ({
-                          ...p,
-                          default_contact_name: e.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={labelClass}>
-                    Phone
-                    <input
-                      className={fieldClass}
-                      value={profile.default_phone}
-                      disabled={!canWrite}
-                      onChange={(e) =>
-                        setProfile((p) => ({
-                          ...p,
-                          default_phone: e.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={labelClass}>
-                    Email
-                    <input
-                      className={fieldClass}
-                      type="email"
-                      value={profile.default_email}
-                      disabled={!canWrite}
-                      onChange={(e) =>
-                        setProfile((p) => ({
-                          ...p,
-                          default_email: e.target.value,
-                        }))
-                      }
-                    />
-                  </label>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Identity
+                    </h3>
+                    <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                      <label className={labelClass}>
+                        Sold-to code
+                        <input
+                          className={fieldClass + " font-mono"}
+                          value={detail.sold_to_code}
+                          disabled
+                          readOnly
+                        />
+                      </label>
+                      <label className={labelClass}>
+                        Customer name
+                        <input
+                          className={fieldClass}
+                          value={profile.sold_to_name}
+                          disabled={!canWrite}
+                          onChange={(e) =>
+                            setProfile((p) => ({
+                              ...p,
+                              sold_to_name: e.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </label>
+                      <label className={labelClass}>
+                        FED ID #
+                        <input
+                          className={fieldClass + " font-mono"}
+                          value={profile.fed_id_number}
+                          disabled={!canWrite}
+                          onChange={(e) =>
+                            setProfile((p) => ({
+                              ...p,
+                              fed_id_number: e.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Contact
+                    </h3>
+                    <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                      <label className={labelClass}>
+                        Contact
+                        <input
+                          className={fieldClass}
+                          value={profile.default_contact_name}
+                          disabled={!canWrite}
+                          onChange={(e) =>
+                            setProfile((p) => ({
+                              ...p,
+                              default_contact_name: e.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className={labelClass}>
+                        Phone
+                        <input
+                          className={fieldClass}
+                          value={profile.default_phone}
+                          disabled={!canWrite}
+                          onChange={(e) =>
+                            setProfile((p) => ({
+                              ...p,
+                              default_phone: e.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label
+                        className={labelClass + " sm:col-span-2"}
+                      >
+                        Email
+                        <input
+                          className={fieldClass}
+                          type="email"
+                          value={profile.default_email}
+                          disabled={!canWrite}
+                          onChange={(e) =>
+                            setProfile((p) => ({
+                              ...p,
+                              default_email: e.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  </div>
                 </div>
                 <label className={labelClass}>
                   Shipping preference / notes
@@ -487,11 +529,7 @@ export default function CustomerDetailPage() {
                     />
                     Active customer
                   </label>
-                ) : (
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    Status: {detail.is_active ? "Active" : "Inactive"}
-                  </p>
-                )}
+                ) : null}
                 {canWrite ? (
                   <button
                     type="submit"
@@ -505,24 +543,23 @@ export default function CustomerDetailPage() {
             </section>
 
             <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
-              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                Box content (packing list)
-              </h2>
-              <p className="mt-1 text-xs text-slate-500">
-                When on, the packer must record which items are in each box and
-                the quantities must add up to the delivery note lines. Used for
-                customs packing lists.
-              </p>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={boxContent}
-                    disabled={!canManageBoxContentFlag || boxContentSaving}
-                    onChange={(e) => setBoxContent(e.target.checked)}
-                  />
-                  Require box contents when packing
-                </label>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={boxContent}
+                      disabled={!canManageBoxContentFlag || boxContentSaving}
+                      onChange={(e) => setBoxContent(e.target.checked)}
+                    />
+                    Require box contents when packing
+                  </label>
+                  <p className="mt-1 text-xs text-slate-500">
+                    When on, the packer must record which items are in each box
+                    and the quantities must add up to the delivery note lines.
+                    Used for customs packing lists.
+                  </p>
+                </div>
                 {canManageBoxContentFlag ? (
                   <button
                     type="button"
@@ -542,7 +579,7 @@ export default function CustomerDetailPage() {
               </div>
             </section>
 
-            <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
+            <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-950">
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
                 Courier accounts
               </h2>
@@ -635,10 +672,20 @@ export default function CustomerDetailPage() {
                       ) : (
                         <div className="flex flex-wrap items-start justify-between gap-2">
                           <div>
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {a.carrier_code}
-                              {!a.is_active ? " · inactive" : ""}
-                              {!a.is_collect_enabled ? " · no collect" : ""}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                {a.carrier_code}
+                              </span>
+                              {!a.is_active ? (
+                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-400">
+                                  Inactive
+                                </span>
+                              ) : null}
+                              {!a.is_collect_enabled ? (
+                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-400">
+                                  No collect
+                                </span>
+                              ) : null}
                             </div>
                             <div className="mt-0.5 font-mono text-sm">
                               {a.account_number}
@@ -655,11 +702,12 @@ export default function CustomerDetailPage() {
                               onClick={() =>
                                 void copyText(
                                   `${a.carrier_code} ${a.account_number}`,
+                                  a.id,
                                 )
                               }
                               className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-600"
                             >
-                              Copy
+                              {copiedId === a.id ? "Copied" : "Copy"}
                             </button>
                             {canWrite ? (
                               <button
