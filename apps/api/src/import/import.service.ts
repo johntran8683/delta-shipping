@@ -17,6 +17,10 @@ import { PermissionsService } from '../auth/permissions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { validateDailyDnExcelHeaders } from './excel-daily-dn-header.validation';
 import { validateShippingIdsExcelHeaders } from './excel-shipping-ids-header.validation';
+import {
+  groupCustomerImportResults,
+  type GroupedCustomerImportResult,
+} from './import-customer-results';
 import { buildStoredPath, ensureUploadDir } from './excel-ingest.service';
 
 @Injectable()
@@ -304,6 +308,7 @@ export class ImportService {
         id: true,
         file_name: true,
         status: true,
+        source_type: true,
         started_at: true,
         completed_at: true,
         summary_message: true,
@@ -391,6 +396,45 @@ export class ImportService {
       ),
     );
 
+    // Shipping IDs batches: per-customer outcomes recorded by the worker.
+    // Grouped so a customer appearing twice in one file lists once
+    // (CREATED wins over UPDATED). DN batches have no such rows.
+    let createdCustomers: GroupedCustomerImportResult[] = [];
+    let updatedCustomers: GroupedCustomerImportResult[] = [];
+    let accountsUpsertedCount = 0;
+    let customerResultsTruncated = false;
+    if (batchMeta.source_type === source_type.SHIPPING_IDS) {
+      const customerResultCap = 20_000;
+      const [resultTotal, resultSum, resultRows] =
+        await this.prisma.$transaction([
+          this.prisma.importCustomerResult.count({
+            where: { batch_id: id },
+          }),
+          this.prisma.importCustomerResult.aggregate({
+            where: { batch_id: id },
+            _sum: { accounts_upserted: true },
+          }),
+          this.prisma.importCustomerResult.findMany({
+            where: { batch_id: id },
+            orderBy: { created_at: 'asc' },
+            select: {
+              customer_id: true,
+              sold_to_code: true,
+              sold_to_name: true,
+              outcome: true,
+              accounts_upserted: true,
+              excel_row: true,
+            },
+            take: customerResultCap,
+          }),
+        ]);
+      accountsUpsertedCount = resultSum._sum.accounts_upserted ?? 0;
+      customerResultsTruncated = resultTotal > resultRows.length;
+      const grouped = groupCustomerImportResults(resultRows);
+      createdCustomers = grouped.filter((g) => g.outcome === 'CREATED');
+      updatedCustomers = grouped.filter((g) => g.outcome === 'UPDATED');
+    }
+
     return {
       batch,
       newDeliveryNotesCount,
@@ -402,6 +446,12 @@ export class ImportService {
       rowFailures,
       rowFailuresTruncated: rowFailureCount > rowFailures.length,
       linkedDeliveryNotesCount,
+      createdCustomers,
+      updatedCustomers,
+      createdCustomersCount: createdCustomers.length,
+      updatedCustomersCount: updatedCustomers.length,
+      accountsUpsertedCount,
+      customerResultsTruncated,
     };
   }
 

@@ -18,18 +18,30 @@ import {
 } from "@/lib/auth-storage";
 import { formatApiErrorPayload } from "@/lib/api-error";
 import { apiBase } from "@/lib/config";
-import { canUseDataImport } from "@/lib/import-access";
+import {
+  canUseDataImport,
+  canUseShippingIdsImport,
+} from "@/lib/import-access";
 
 type ReportBatch = {
   id: string;
   file_name: string;
   status: string;
+  source_type: string;
   started_at: string;
   completed_at: string | null;
   summary_message: string | null;
   total_rows: number;
   success_rows: number;
   error_rows: number;
+};
+
+type ImportedCustomer = {
+  customer_id: string | null;
+  sold_to_code: string;
+  sold_to_name: string;
+  accounts_upserted: number;
+  excel_row: number | null;
 };
 
 type RowFailure = {
@@ -51,6 +63,12 @@ type ReportResponse = {
   rowFailures: RowFailure[];
   rowFailuresTruncated?: boolean;
   linkedDeliveryNotesCount: number;
+  createdCustomers: ImportedCustomer[];
+  updatedCustomers: ImportedCustomer[];
+  createdCustomersCount: number;
+  updatedCustomersCount: number;
+  accountsUpsertedCount: number;
+  customerResultsTruncated?: boolean;
 };
 
 function formatWhen(iso: string | null) {
@@ -125,6 +143,95 @@ function CollapsibleSection({
   );
 }
 
+function CustomerListSection({
+  title,
+  count,
+  defaultOpen,
+  customers,
+  filter,
+  onFilterChange,
+  filterPlaceholder,
+  truncated,
+}: {
+  title: string;
+  count: number;
+  defaultOpen: boolean;
+  customers: ImportedCustomer[];
+  filter: string;
+  onFilterChange: (v: string) => void;
+  filterPlaceholder: string;
+  truncated: boolean;
+}) {
+  return (
+    <CollapsibleSection title={title} count={count} defaultOpen={defaultOpen}>
+      <div className="border-b border-slate-100 px-4 py-2 dark:border-slate-800">
+        <label className="sr-only" htmlFor={`${title}-filter`}>
+          {filterPlaceholder}
+        </label>
+        <input
+          id={`${title}-filter`}
+          type="search"
+          value={filter}
+          onChange={(e) => onFilterChange(e.target.value)}
+          placeholder={filterPlaceholder}
+          className="w-full rounded-md border-0 bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-200 placeholder:text-slate-400 focus:ring-2 focus:ring-sky-500/30 dark:bg-slate-900 dark:ring-slate-700"
+        />
+      </div>
+      <div className="max-h-[min(28rem,55vh)] overflow-auto">
+        <table className="min-w-full text-left text-xs">
+          <thead className="sticky top-0 z-10 border-b border-slate-100 bg-slate-50/95 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-400">
+            <tr>
+              <th className="px-4 py-2 md:px-5">Sold-to</th>
+              <th className="px-2 py-2">Name</th>
+              <th className="px-2 py-2 text-right">Accounts</th>
+              <th className="px-2 py-2 text-right">Excel row</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50 dark:divide-slate-800/80">
+            {customers.map((c) => (
+              <tr
+                key={c.customer_id ?? c.sold_to_code}
+                className="text-slate-800 dark:text-slate-200"
+              >
+                <td className="whitespace-nowrap px-4 py-1.5 font-mono text-[13px] md:px-5">
+                  {c.customer_id ? (
+                    <Link
+                      href={`/customers/${c.customer_id}`}
+                      className="font-medium text-sky-700 underline decoration-sky-300/80 underline-offset-2 hover:text-sky-900 dark:text-sky-400"
+                    >
+                      {c.sold_to_code}
+                    </Link>
+                  ) : (
+                    c.sold_to_code
+                  )}
+                </td>
+                <td className="px-2 py-1.5">{c.sold_to_name}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">
+                  {c.accounts_upserted.toLocaleString()}
+                </td>
+                <td className="px-2 py-1.5 text-right tabular-nums">
+                  {c.excel_row ?? "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {customers.length === 0 && filter.trim() ? (
+        <p className="px-4 py-4 text-center text-sm text-slate-500">
+          No customers match “{filter.trim()}”.
+        </p>
+      ) : null}
+      {truncated && !filter.trim() ? (
+        <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500 dark:border-slate-800">
+          Customer list is capped — only the first customers from this import
+          are shown.
+        </p>
+      ) : null}
+    </CollapsibleSection>
+  );
+}
+
 export default function ImportReportPage() {
   const params = useParams();
   const id = typeof params.id === "string" ? params.id : "";
@@ -135,11 +242,17 @@ export default function ImportReportPage() {
   const [error, setError] = useState<string | null>(null);
   const [dnFilter, setDnFilter] = useState("");
   const [errorFilter, setErrorFilter] = useState("");
+  const [createdCustomerFilter, setCreatedCustomerFilter] = useState("");
+  const [updatedCustomerFilter, setUpdatedCustomerFilter] = useState("");
   const [reverting, setReverting] = useState(false);
-  const [permHint, setPermHint] = useState<string | null>(() =>
-    canUseDataImport(getActiveRoleCode())
+  const activeRole = getActiveRoleCode();
+  // The API still enforces per-batch access (DN reports stay
+  // SUPERVISOR/SYSTEM; shipping reports allow the customer importer), so
+  // the page only blocks roles with no import access at all.
+  const [permHint] = useState<string | null>(() =>
+    canUseDataImport(activeRole) || canUseShippingIdsImport(activeRole)
       ? null
-      : "Import reports require active role SUPERVISOR or SYSTEM.",
+      : "Import reports require an import role (SUPERVISOR, SYSTEM, or CSA for Shipping IDs imports).",
   );
 
   const loadReport = useCallback(async () => {
@@ -199,6 +312,49 @@ export default function ImportReportPage() {
     );
   }, [data, errorFilter]);
 
+  const filteredCreatedCustomers = useMemo(() => {
+    if (!data) return [];
+    const q = createdCustomerFilter.trim().toLowerCase();
+    if (!q) return data.createdCustomers;
+    return data.createdCustomers.filter(
+      (c) =>
+        c.sold_to_code.toLowerCase().includes(q) ||
+        c.sold_to_name.toLowerCase().includes(q),
+    );
+  }, [data, createdCustomerFilter]);
+
+  const filteredUpdatedCustomers = useMemo(() => {
+    if (!data) return [];
+    const q = updatedCustomerFilter.trim().toLowerCase();
+    if (!q) return data.updatedCustomers;
+    return data.updatedCustomers.filter(
+      (c) =>
+        c.sold_to_code.toLowerCase().includes(q) ||
+        c.sold_to_name.toLowerCase().includes(q),
+    );
+  }, [data, updatedCustomerFilter]);
+
+  const isShippingBatch = data?.batch.source_type === "SHIPPING_IDS";
+
+  const metricRows: [string, number][] = data
+    ? [
+        ["Rows in file", data.batch.total_rows],
+        ["Successful rows", data.batch.success_rows],
+        ["Row issues", data.batch.error_rows],
+        ...(isShippingBatch
+          ? ([
+              ["Customers created", data.createdCustomersCount],
+              ["Customers updated", data.updatedCustomersCount],
+              ["Carrier account upserts", data.accountsUpsertedCount],
+            ] as [string, number][])
+          : ([
+              ["New delivery notes", data.newDeliveryNotesCount],
+              ["Updated (unchanged) DNs", data.existingDeliveryNotesCount],
+              ["DNs linked to batch", data.linkedDeliveryNotesCount],
+            ] as [string, number][])),
+      ]
+    : [];
+
   async function undoImport() {
     if (!data || data.batch.status === "RUNNING") return;
     const n = data.linkedDeliveryNotesCount;
@@ -256,16 +412,23 @@ export default function ImportReportPage() {
     }
   }
 
+  // Undo only ever applies to daily DN imports (the API refuses shipping
+  // batches), and only for the supervisor/system roles.
   const canUndo =
     data &&
+    data.batch.source_type === "DAILY_DN" &&
     data.batch.status !== "RUNNING" &&
-    !permHint &&
+    canUseDataImport(activeRole) &&
     !reverting;
 
   return (
     <OperationsShell
       title="Import report"
-      subtitle="Batch outcome for supervisors — summary, row issues, and updated delivery notes."
+      subtitle={
+        isShippingBatch
+          ? "Batch outcome — summary, row issues, and customers created or updated."
+          : "Batch outcome for supervisors — summary, row issues, and updated delivery notes."
+      }
     >
       <div className="mx-auto max-w-5xl space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -370,14 +533,7 @@ export default function ImportReportPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {[
-                    ["Rows in file", data.batch.total_rows],
-                    ["Successful rows", data.batch.success_rows],
-                    ["Row issues", data.batch.error_rows],
-                    ["New delivery notes", data.newDeliveryNotesCount],
-                    ["Updated (unchanged) DNs", data.existingDeliveryNotesCount],
-                    ["DNs linked to batch", data.linkedDeliveryNotesCount],
-                  ].map(([label, value]) => (
+                  {metricRows.map(([label, value]) => (
                     <tr key={String(label)}>
                       <td className="px-4 py-2 text-slate-700 dark:text-slate-300 md:px-5">
                         {label}
@@ -462,7 +618,35 @@ export default function ImportReportPage() {
               </CollapsibleSection>
             ) : null}
 
-            {data.existingDeliveryNotesCount > 0 ? (
+            {isShippingBatch ? (
+              <>
+                {data.createdCustomersCount > 0 ? (
+                  <CustomerListSection
+                    title="Created customers"
+                    count={data.createdCustomersCount}
+                    defaultOpen
+                    customers={filteredCreatedCustomers}
+                    filter={createdCustomerFilter}
+                    onFilterChange={setCreatedCustomerFilter}
+                    filterPlaceholder="Search by sold-to code or name…"
+                    truncated={Boolean(data.customerResultsTruncated)}
+                  />
+                ) : null}
+                {data.updatedCustomersCount > 0 ? (
+                  <CustomerListSection
+                    title="Updated customers"
+                    count={data.updatedCustomersCount}
+                    defaultOpen={false}
+                    customers={filteredUpdatedCustomers}
+                    filter={updatedCustomerFilter}
+                    onFilterChange={setUpdatedCustomerFilter}
+                    filterPlaceholder="Search by sold-to code or name…"
+                    truncated={Boolean(data.customerResultsTruncated)}
+                  />
+                ) : null}
+              </>
+            ) : null}
+            {!isShippingBatch && data.existingDeliveryNotesCount > 0 ? (
               <CollapsibleSection
                 title="Updated delivery notes (already on file)"
                 count={data.existingDeliveryNotesCount}
@@ -522,11 +706,11 @@ export default function ImportReportPage() {
                   </Link>
                 </p>
               </CollapsibleSection>
-            ) : (
+            ) : !isShippingBatch ? (
               <p className="border-t border-slate-100 px-4 py-4 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-400">
                 All delivery notes in this file were newly created.
               </p>
-            )}
+            ) : null}
           </article>
         ) : null}
       </div>

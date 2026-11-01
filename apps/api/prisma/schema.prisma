@@ -146,10 +146,11 @@ model ImportBatch {
   created_by      String?      @db.Uuid
   summary_message String?
 
-  creator                User?            @relation(fields: [created_by], references: [id], onDelete: SetNull)
+  creator                User?                  @relation(fields: [created_by], references: [id], onDelete: SetNull)
   row_errors             ImportRowError[]
-  delivery_notes         DeliveryNote[]   @relation("LastSeenBatch")
-  created_delivery_notes DeliveryNote[]   @relation("CreatedByBatch")
+  customer_results       ImportCustomerResult[]
+  delivery_notes         DeliveryNote[]         @relation("LastSeenBatch")
+  created_delivery_notes DeliveryNote[]         @relation("CreatedByBatch")
 
   @@map("import_batches")
 }
@@ -169,6 +170,31 @@ model ImportRowError {
 
   @@index([batch_id])
   @@map("import_row_errors")
+}
+
+/// One row per successful Shipping IDs Excel row, so the import report can
+/// list which customers a batch created or updated. A customer appearing
+/// twice in one file gets two rows; the report groups them (CREATED wins
+/// over UPDATED, account counts sum). `customer_id` is nullable so the
+/// result survives the customer being deleted later.
+model ImportCustomerResult {
+  id                String   @id @default(uuid()) @db.Uuid
+  batch_id          String   @db.Uuid
+  customer_id       String?  @db.Uuid
+  sold_to_code      String   @db.VarChar(30)
+  sold_to_name      String   @db.VarChar(255)
+  /// 'CREATED' | 'UPDATED'
+  outcome           String   @db.VarChar(20)
+  accounts_upserted Int      @default(0)
+  excel_row         Int?
+  created_at        DateTime @default(now())
+
+  batch    ImportBatch @relation(fields: [batch_id], references: [id], onDelete: Cascade)
+  customer Customer?   @relation(fields: [customer_id], references: [id], onDelete: SetNull)
+
+  @@index([batch_id])
+  @@index([batch_id, outcome])
+  @@map("import_customer_results")
 }
 
 model Customer {
@@ -191,6 +217,7 @@ model Customer {
   ship_to_locations         ShipToLocation[]
   customer_carrier_accounts CustomerCarrierAccount[]
   delivery_notes            DeliveryNote[]
+  import_results            ImportCustomerResult[]
 
   @@map("customers")
 }

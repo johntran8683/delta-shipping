@@ -201,6 +201,7 @@ export class ExcelIngestService {
           if (existing) customersUpdated += 1;
           else customersCreated += 1;
 
+          let rowAccountsUpserted = 0;
           for (const col of carrierColumns) {
             const accountNumber = toStr(pickCell(data, ...col.labels), 80);
             if (!accountNumber) continue;
@@ -230,7 +231,21 @@ export class ExcelIngestService {
               });
             }
             accountsUpserted += 1;
+            rowAccountsUpserted += 1;
           }
+
+          // Per-row outcome for the import report (created/updated lists).
+          await this.prisma.importCustomerResult.create({
+            data: {
+              batch_id: batchId,
+              customer_id: customer.id,
+              sold_to_code: soldToCode,
+              sold_to_name: soldToName,
+              outcome: existing ? 'UPDATED' : 'CREATED',
+              accounts_upserted: rowAccountsUpserted,
+              excel_row: excelRow,
+            },
+          });
 
           successRows += 1;
         } catch (rowErr) {
