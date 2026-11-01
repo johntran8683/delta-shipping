@@ -46,6 +46,28 @@ const emptyProfile = {
   is_active: true,
 };
 
+/** Carriers always shown as groups, in this order. Accounts with any other
+ * code still show, as their own group after these. */
+const KNOWN_CARRIERS = ["FEDEX", "UPS", "DHL", "PUROLATOR"];
+
+function groupCarrierAccounts(
+  accounts: CarrierAccount[],
+): { carrier: string; accounts: CarrierAccount[] }[] {
+  const byCarrier = new Map<string, CarrierAccount[]>();
+  for (const a of accounts) {
+    const list = byCarrier.get(a.carrier_code) ?? [];
+    list.push(a);
+    byCarrier.set(a.carrier_code, list);
+  }
+  const others = [...byCarrier.keys()]
+    .filter((c) => !KNOWN_CARRIERS.includes(c))
+    .sort();
+  return [...KNOWN_CARRIERS, ...others].map((carrier) => ({
+    carrier,
+    accounts: byCarrier.get(carrier) ?? [],
+  }));
+}
+
 export default function CustomerDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -65,11 +87,10 @@ export default function CustomerDetailPage() {
   /** Per-customer box-content requirement (packing list for customs). */
   const [boxContent, setBoxContent] = useState(false);
   const [boxContentSaving, setBoxContentSaving] = useState(false);
-  const [newCarrier, setNewCarrier] = useState({
-    carrier_code: "FEDEX",
-    account_number: "",
-    notes: "",
-  });
+  /** Draft account number per carrier for the inline add rows. */
+  const [newAccountNumbers, setNewAccountNumbers] = useState<
+    Record<string, string>
+  >({});
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState({
     account_number: "",
@@ -244,10 +265,10 @@ export default function CustomerDetailPage() {
     }
   }
 
-  async function addCarrierAccount(e: React.FormEvent) {
-    e.preventDefault();
+  async function addCarrierAccountForCarrier(carrierCode: string) {
+    const accountNumber = (newAccountNumbers[carrierCode] ?? "").trim();
     const token = getAccessToken();
-    if (!token || !customerId || !canWrite) return;
+    if (!token || !customerId || !canWrite || !accountNumber) return;
     setSaving(true);
     setError(null);
     try {
@@ -260,9 +281,9 @@ export default function CustomerDetailPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            carrier_code: newCarrier.carrier_code,
-            account_number: newCarrier.account_number,
-            notes: newCarrier.notes || null,
+            carrier_code: carrierCode,
+            account_number: accountNumber,
+            notes: null,
           }),
         },
       );
@@ -272,7 +293,7 @@ export default function CustomerDetailPage() {
         return;
       }
       setDetail(body as CustomerDetail);
-      setNewCarrier({ carrier_code: "FEDEX", account_number: "", notes: "" });
+      setNewAccountNumbers((d) => ({ ...d, [carrierCode]: "" }));
       setSavedOk(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Add account failed");
@@ -590,17 +611,24 @@ export default function CustomerDetailPage() {
                 instead of deleting.
               </p>
 
-              <ul className="mt-3 space-y-2">
-                {detail.carrier_accounts.length === 0 ? (
-                  <li className="text-sm text-slate-500">
-                    No courier accounts on file.
-                  </li>
-                ) : (
-                  detail.carrier_accounts.map((a) => (
-                    <li
-                      key={a.id}
-                      className="rounded-lg border border-slate-200 px-3 py-1.5 dark:border-slate-700"
-                    >
+              <div className="mt-4 space-y-4">
+                {groupCarrierAccounts(detail.carrier_accounts).map(
+                  ({ carrier, accounts }) => (
+                    <div key={carrier}>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {carrier}
+                      </h3>
+                      {accounts.length === 0 ? (
+                        <p className="mt-1 text-sm text-slate-500">
+                          No account on file.
+                        </p>
+                      ) : (
+                        <ul className="mt-2 space-y-2">
+                          {accounts.map((a) => (
+                            <li
+                              key={a.id}
+                              className="rounded-lg border border-slate-200 px-3 py-1.5 dark:border-slate-700"
+                            >
                       {editingAccountId === a.id && canWrite ? (
                         <div className="space-y-2">
                           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -723,73 +751,54 @@ export default function CustomerDetailPage() {
                           </div>
                         </div>
                       )}
-                    </li>
-                  ))
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {canWrite ? (
+                        <form
+                          className="mt-2 flex flex-wrap items-center gap-2"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            void addCarrierAccountForCarrier(carrier);
+                          }}
+                        >
+                          <label
+                            className="sr-only"
+                            htmlFor={`new-acct-${carrier}`}
+                          >
+                            Account number for {carrier}
+                          </label>
+                          <input
+                            id={`new-acct-${carrier}`}
+                            className="min-w-[10rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-sm dark:border-slate-600 dark:bg-slate-900"
+                            placeholder="Account number"
+                            value={newAccountNumbers[carrier] ?? ""}
+                            onChange={(e) =>
+                              setNewAccountNumbers((d) => ({
+                                ...d,
+                                [carrier]: e.target.value,
+                              }))
+                            }
+                          />
+                          <button
+                            type="submit"
+                            disabled={
+                              saving ||
+                              !(newAccountNumbers[carrier] ?? "").trim()
+                            }
+                            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium dark:border-slate-600 disabled:opacity-40"
+                          >
+                            Add account
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
+                  ),
                 )}
-              </ul>
+              </div>
 
-              {canWrite ? (
-                <form
-                  className="mt-4 space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700"
-                  onSubmit={addCarrierAccount}
-                >
-                  <h3 className="text-sm font-medium">Add courier account</h3>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <label className={labelClass}>
-                      Carrier
-                      <select
-                        className={fieldClass}
-                        value={newCarrier.carrier_code}
-                        onChange={(e) =>
-                          setNewCarrier((c) => ({
-                            ...c,
-                            carrier_code: e.target.value,
-                          }))
-                        }
-                      >
-                        <option value="FEDEX">FEDEX</option>
-                        <option value="UPS">UPS</option>
-                        <option value="DHL">DHL</option>
-                        <option value="PUROLATOR">PUROLATOR</option>
-                      </select>
-                    </label>
-                    <label className={labelClass + " sm:col-span-2"}>
-                      Account number
-                      <input
-                        className={fieldClass + " font-mono"}
-                        required
-                        value={newCarrier.account_number}
-                        onChange={(e) =>
-                          setNewCarrier((c) => ({
-                            ...c,
-                            account_number: e.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                  </div>
-                  <label className={labelClass}>
-                    Notes
-                    <input
-                      className={fieldClass}
-                      value={newCarrier.notes}
-                      onChange={(e) =>
-                        setNewCarrier((c) => ({
-                          ...c,
-                          notes: e.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <button
-                    type="submit"
-                    disabled={saving || !newCarrier.account_number.trim()}
-                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium dark:border-slate-600 disabled:opacity-40"
-                  >
-                    Add account
-                  </button>
-                </form>
-              ) : null}
+
             </section>
             </div>
           </>
