@@ -581,126 +581,115 @@ function RecordedBoxesCard({
   }
   const boxSizesCopyText = buildBoxSizesCopyText(boxes);
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:border-slate-700/70 dark:bg-slate-950/40">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800/80">
-        <h3 className="text-[13px] font-semibold text-slate-900 dark:text-slate-100">
-          Recorded boxes
-        </h3>
+    <div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-slate-100 pt-2.5 dark:border-slate-800/80">
+        <div className="text-xs tabular-nums text-slate-600 dark:text-slate-300">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            Total boxes
+          </span>{" "}
+          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+            {boxes.length}
+          </span>
+        </div>
+        {weight ? (
+          <div className="text-xs tabular-nums text-slate-600 dark:text-slate-300">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Total weight
+            </span>{" "}
+            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {weight.lb} lb
+            </span>{" "}
+            <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+              ({weight.kg} kg)
+            </span>
+          </div>
+        ) : null}
+        {sizeGroups.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Sizes (in)
+            </span>
+            {sizeGroups.map(({ display, count }) => (
+              <span
+                key={display}
+                className="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              >
+                <span className="font-semibold">{display}</span>
+                {count > 1 ? (
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                    ({count})
+                  </span>
+                ) : null}
+              </span>
+            ))}
+            <CopyTextButton value={boxSizesCopyText} label="box sizes" />
+          </div>
+        ) : null}
         {rateEstimator ? (
-          <div className="flex shrink-0 items-center">{rateEstimator}</div>
+          <div className="ml-auto flex shrink-0 items-center">{rateEstimator}</div>
         ) : null}
       </div>
-      <div className="grid sm:grid-cols-[230px_minmax(0,1fr)]">
-        <div className="space-y-3.5 border-b border-slate-100 px-4 py-3.5 dark:border-slate-800/80 sm:border-b-0 sm:border-r">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Total boxes
-            </p>
-            <p className="mt-0.5 text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-              {boxes.length}
-            </p>
-          </div>
-          {weight ? (
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                Total weight
-              </p>
-              <p className="mt-0.5 text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                {weight.lb} lb
-                <span className="ml-1.5 text-xs font-medium text-slate-400 dark:text-slate-500">
-                  ({weight.kg} kg)
-                </span>
-              </p>
-            </div>
-          ) : null}
-          {sizeGroups.length > 0 ? (
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                Sizes (in)
-              </p>
-              <ul className="mt-1.5 flex list-none flex-wrap items-center gap-1.5 p-0" role="list">
-                {sizeGroups.map(({ display, count }) => (
-                  <li
-                    key={display}
-                    className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs tabular-nums text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  >
-                    <span className="font-semibold">{display}</span>
-                    {count > 1 ? (
-                      <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                        ({count})
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-2">
-                <CopyTextButton value={boxSizesCopyText} label="box sizes" />
-              </div>
-            </div>
-          ) : null}
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[280px] border-collapse text-left">
-            <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
-                <th className="px-4 py-2">Box</th>
-                <th className="px-3 py-2">Weight</th>
-                <th className="px-4 py-2">L × W × H (in)</th>
-                <th className="px-4 py-2">Contents</th>
-              </tr>
-            </thead>
-            <tbody>
-              {boxes.map((b) => {
-                const bn = b.box_number?.trim();
-                const label = bn ? bn : `Box ${b.sort_order + 1}`;
-                return (
-                  <tr
-                    key={b.id}
-                    className="border-b border-slate-50 transition last:border-b-0 hover:bg-slate-50/80 dark:border-slate-800/60 dark:hover:bg-slate-900/60"
-                  >
-                    <td className="px-4 py-2 font-mono text-sm font-semibold tabular-nums tracking-tight text-slate-900 dark:text-slate-50">
-                      {label}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-sm tabular-nums text-slate-700 dark:text-slate-200">
-                      <span className="font-semibold">{b.weight_lb}</span>
-                      <span className="ml-1 text-xs font-medium text-slate-400 dark:text-slate-500">
-                        lb
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 font-mono text-sm font-medium tabular-nums text-slate-700 dark:text-slate-200">
-                      {b.length_in} × {b.width_in} × {b.height_in}
-                    </td>
-                    <td className="px-4 py-2 text-sm text-slate-700 dark:text-slate-200">
-                      {(b.items ?? []).length > 0 ? (
-                        <ul className="m-0 list-none space-y-1 p-0">
-                          {(b.items ?? []).map((it) => (
-                            <li key={it.id} className="leading-snug">
-                              <span className="font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                                {it.material_code?.trim() || "(no part #)"}
-                              </span>{" "}
-                              <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300">
-                                × {it.quantity}
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[280px] border-collapse text-left">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
+              <th className="px-3 py-1.5">Box</th>
+              <th className="px-3 py-1.5">Weight</th>
+              <th className="px-3 py-1.5">L × W × H (in)</th>
+              <th className="px-3 py-1.5">Contents</th>
+            </tr>
+          </thead>
+          <tbody>
+            {boxes.map((b) => {
+              const bn = b.box_number?.trim();
+              const label = bn ? bn : `Box ${b.sort_order + 1}`;
+              return (
+                <tr
+                  key={b.id}
+                  className="border-b border-slate-50 transition last:border-b-0 hover:bg-slate-50/80 dark:border-slate-800/60 dark:hover:bg-slate-900/60"
+                >
+                  <td className="px-3 py-1.5 font-mono text-sm font-semibold tabular-nums tracking-tight text-slate-900 dark:text-slate-50">
+                    {label}
+                  </td>
+                  <td className="px-3 py-1.5 font-mono text-sm tabular-nums text-slate-700 dark:text-slate-200">
+                    <span className="font-semibold">{b.weight_lb}</span>
+                    <span className="ml-1 text-xs font-medium text-slate-400 dark:text-slate-500">
+                      lb
+                    </span>
+                  </td>
+                  <td className="px-3 py-1.5 font-mono text-sm font-medium tabular-nums text-slate-700 dark:text-slate-200">
+                    {b.length_in} × {b.width_in} × {b.height_in}
+                  </td>
+                  <td className="px-3 py-1.5 text-sm text-slate-700 dark:text-slate-200">
+                    {(b.items ?? []).length > 0 ? (
+                      <ul className="m-0 list-none space-y-1 p-0">
+                        {(b.items ?? []).map((it) => (
+                          <li key={it.id} className="leading-snug">
+                            <span className="font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                              {it.material_code?.trim() || "(no part #)"}
+                            </span>{" "}
+                            <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300">
+                              × {it.quantity}
+                            </span>
+                            {it.material_description?.trim() ? (
+                              <span className="block text-xs text-slate-500 dark:text-slate-400">
+                                {it.material_description.trim()}
                               </span>
-                              {it.material_description?.trim() ? (
-                                <span className="block text-xs text-slate-500 dark:text-slate-400">
-                                  {it.material_description.trim()}
-                                </span>
-                              ) : null}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <span className="text-xs text-slate-400 dark:text-slate-500">
-                          —
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-xs text-slate-400 dark:text-slate-500">
+                        —
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1047,7 +1036,7 @@ function CompletedPackResultBanner({
       ) : null}
 
       {boxes.length > 0 ? (
-        <div className="mt-5">
+        <div className="mt-3">
           <RecordedBoxesCard boxes={boxes} rateEstimator={rateEstimator} />
         </div>
       ) : null}
