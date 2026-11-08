@@ -116,6 +116,7 @@ type Detail = {
   ship_to_region_state: string | null;
   created_at: string;
   ship_to_location?: ShipToLocationDetail | null;
+  sold_to_location?: ShipToLocationDetail | null;
   lines: LineRow[];
   status_history: unknown[];
   priority_history: unknown[];
@@ -185,34 +186,77 @@ function InfoField({
   );
 }
 
+function addressParts(loc: ShipToLocationDetail | null | undefined): string[] {
+  if (!loc) return [];
+  return [
+    loc.street1,
+    loc.street2,
+    [loc.city, loc.state_region].filter(Boolean).join(", "),
+    loc.postal_code,
+    loc.country_name || loc.country_code,
+  ].filter((p): p is string => Boolean(p && p.trim()));
+}
+
+function PartyColumn({
+  label,
+  name,
+  code,
+  parts,
+}: {
+  label: string;
+  name: string;
+  code: string;
+  parts: string[];
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+        {label}
+      </p>
+      <p
+        className="mt-0.5 truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
+        title={name ?? undefined}
+      >
+        {name || "—"}
+        {code ? (
+          <span className="ml-2 font-mono text-xs font-normal text-slate-500 dark:text-slate-400">
+            {code}
+          </span>
+        ) : null}
+      </p>
+      {parts.length > 0 ? (
+        <p className="mt-1 text-[13px] leading-snug text-slate-600 dark:text-slate-300">
+          {parts.map((p, i) => (
+            <span key={i}>
+              {i > 0 ? <br /> : null}
+              {p}
+            </span>
+          ))}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function DnShipmentInfoCard({ detail }: { detail: Detail }) {
-  const loc = detail.ship_to_location;
-  const addrParts = loc
-    ? [
-        loc.street1,
-        loc.street2,
-        [loc.city, loc.state_region].filter(Boolean).join(", "),
-        loc.postal_code,
-        loc.country_name || loc.country_code,
-      ].filter((p) => p && p.trim())
-    : [];
   return (
     <section className={infoCardCls} aria-label="Shipment information">
       <h2 className={infoCardTitleCls}>Shipment information</h2>
-      <div className="mt-2.5 grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-2">
+      <div className="mt-2.5 grid grid-cols-1 gap-x-8 gap-y-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.7fr)]">
+        <PartyColumn
+          label="Sold-To"
+          name={detail.sold_to_name}
+          code={detail.sold_to_code}
+          parts={addressParts(detail.sold_to_location)}
+        />
+        <PartyColumn
+          label="Ship-to"
+          name={detail.ship_to_name}
+          code={detail.ship_to_code}
+          parts={addressParts(detail.ship_to_location)}
+        />
         <div className="min-w-0">
-          <p
-            className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
-            title={detail.sold_to_name ?? undefined}
-          >
-            {detail.sold_to_name || "—"}
-            {detail.sold_to_code ? (
-              <span className="ml-2 font-mono text-xs font-normal text-slate-500 dark:text-slate-400">
-                {detail.sold_to_code}
-              </span>
-            ) : null}
-          </p>
-          <dl className="mt-2 grid grid-cols-3 gap-x-4 gap-y-2">
+          <dl className="space-y-2">
             <InfoField
               label="PO #"
               value={detail.customer_po?.trim() || "—"}
@@ -225,29 +269,6 @@ function DnShipmentInfoCard({ detail }: { detail: Detail }) {
               mono
             />
           </dl>
-        </div>
-        <div className="min-w-0">
-          <p
-            className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
-            title={detail.ship_to_name ?? undefined}
-          >
-            {detail.ship_to_name || "—"}
-            {detail.ship_to_code ? (
-              <span className="ml-2 font-mono text-xs font-normal text-slate-500 dark:text-slate-400">
-                {detail.ship_to_code}
-              </span>
-            ) : null}
-          </p>
-          {addrParts.length > 0 ? (
-            <p className="mt-1 text-[13px] leading-snug text-slate-600 dark:text-slate-300">
-              {addrParts.map((p, i) => (
-                <span key={i}>
-                  {i > 0 ? <br /> : null}
-                  {p}
-                </span>
-              ))}
-            </p>
-          ) : null}
         </div>
       </div>
       <dl className="mt-2.5 grid grid-cols-2 gap-x-8 gap-y-2 border-t border-[color:var(--app-border)] pt-2.5">

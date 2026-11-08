@@ -11,11 +11,13 @@ import {
 } from '../delivery-notes/charging-method';
 import {
   parsePriorityLabel,
+  normHeader,
   pickCell,
   pickCellExact,
   pickCurrency,
   sheetHasShipToCodeColumn,
   sheetHasSoldToCodeColumn,
+  sheetHasSoldToStreetImportColumn,
   sheetHasStreetImportColumn,
   toDateOnly,
   toDecimal,
@@ -332,6 +334,8 @@ export class ExcelIngestService {
 
       const sheetKeys = rowCtxs.length > 0 ? Object.keys(rowCtxs[0]!.data) : [];
       const sheetHasStreetColumn = sheetHasStreetImportColumn(sheetKeys);
+      const sheetHasSoldToStreetColumn =
+        sheetHasSoldToStreetImportColumn(sheetKeys);
       const hasSoldToCol = sheetHasSoldToCodeColumn(sheetKeys);
       const hasShipToCodeCol = sheetHasShipToCodeColumn(sheetKeys);
 
@@ -485,6 +489,22 @@ export class ExcelIngestService {
               },
             });
           }
+          if (!sheetHasSoldToStreetColumn) {
+            await this.prisma.importRowError.create({
+              data: {
+                batch_id: batchId,
+                sheet_name: sheetName.slice(0, 120),
+                row_number: headerCtx.excelRow,
+                error_code: 'MISSING_SOLD_TO_STREET_COLUMN',
+                severity: error_severity.WARNING,
+                error_message:
+                  'No sold-to street column on this sheet (add one of: "Sold-to Street", ' +
+                  '"Sold to Street", "Bill-to Street", "Sold-to Address 1"). ' +
+                  'The sold-to address is not imported from this file.',
+                raw_row_json: header as object,
+              },
+            });
+          }
         } catch (e) {
           this.log.warn(`DN ${dnNumber} failed: ${e}`);
           errorRows += group.length;
@@ -573,12 +593,22 @@ export class ExcelIngestService {
       ),
       255,
     );
+    // Ship-to lookups run against a header with sold-to / bill-to columns
+    // removed: bare labels like "City", "State", "Postal" and "Country"
+    // would otherwise match "Sold-to City" etc. through pickCell's
+    // contains fallback and return the sold-to value as the ship-to one.
+    const shipHeader = Object.fromEntries(
+      Object.entries(header).filter(([k]) => {
+        const nk = normHeader(k);
+        return !nk.startsWith('sold to') && !nk.startsWith('bill to');
+      }),
+    );
     const ship_to_name = toStr(
-      pickCell(header, 'Ship-to Name', 'Ship to Name', 'Ship To Name'),
+      pickCell(shipHeader, 'Ship-to Name', 'Ship to Name', 'Ship To Name'),
       255,
     );
     const rawStreet1 = pickCellExact(
-      header,
+      shipHeader,
       'Ship-to Street',
       'Ship to Street',
       'Ship-to-Street',
@@ -588,7 +618,7 @@ export class ExcelIngestService {
     const street1 = toStr(rawStreet1, 255);
     const street2 = toStr(
       pickCell(
-        header,
+        shipHeader,
         'Ship-to Street 2',
         'Ship to Street 2',
         'Address 2',
@@ -597,12 +627,12 @@ export class ExcelIngestService {
       255,
     );
     const city = toStr(
-      pickCell(header, 'Ship-to City', 'Ship to City', 'City'),
+      pickCell(shipHeader, 'Ship-to City', 'Ship to City', 'City'),
       120,
     );
     const state_region = toStr(
       pickCell(
-        header,
+        shipHeader,
         'Ship-to State',
         'Ship-to Region/State',
         'Ship to State',
@@ -612,18 +642,114 @@ export class ExcelIngestService {
       120,
     );
     const postal_code = toStr(
-      pickCell(header, 'Postal Code', 'Zip', 'ZIP', 'Postal'),
+      pickCell(shipHeader, 'Postal Code', 'Zip', 'ZIP', 'Postal'),
       30,
     );
     const country_name = toStr(
-      pickCell(header, 'Country', 'Country Name'),
+      pickCell(shipHeader, 'Country', 'Country Name'),
       120,
     );
     // Workbooks with a "Country" name column but no code column: derive the
     // code from the name so quotes work without manual cleanup.
     const country_code =
-      toStr(pickCell(header, 'Country Code', 'Cntry', 'Country Cd'), 10) ||
+      toStr(pickCell(shipHeader, 'Country Code', 'Cntry', 'Country Cd'), 10) ||
       countryCodeFromName(country_name) ||
+      null;
+
+    // Sold-to party's own address, from the same header row. Exact match
+    // for the street (mirrors ship-to) so a "Ship-to Street" column can
+    // never be read as the sold-to one.
+    const rawSoldToStreet1 = pickCellExact(
+      header,
+      'Sold-to Street',
+      'Sold to Street',
+      'Sold-to-Street',
+      'Bill-to Street',
+      'Bill to Street',
+      'Bill-to-Street',
+      'Sold-to Address 1',
+      'Sold to Address 1',
+      'Bill-to Address 1',
+      'Bill to Address 1',
+    );
+    const sold_to_street1 = toStr(rawSoldToStreet1, 255);
+    const sold_to_street2 = toStr(
+      pickCell(
+        header,
+        'Sold-to Street 2',
+        'Sold to Street 2',
+        'Bill-to Street 2',
+        'Bill to Street 2',
+        'Sold-to Address 2',
+        'Sold to Address 2',
+        'Bill-to Address 2',
+        'Bill to Address 2',
+      ),
+      255,
+    );
+    const sold_to_city = toStr(
+      pickCell(
+        header,
+        'Sold-to City',
+        'Sold to City',
+        'Bill-to City',
+        'Bill to City',
+      ),
+      120,
+    );
+    const sold_to_state_region = toStr(
+      pickCell(
+        header,
+        'Sold-to State',
+        'Sold to State',
+        'Sold-to Region/State',
+        'Sold to Region/State',
+        'Sold-to Region',
+        'Sold to Region',
+        'Bill-to State',
+        'Bill to State',
+        'Sold-to Province',
+        'Sold to Province',
+        'Bill-to Province',
+      ),
+      120,
+    );
+    const sold_to_postal_code = toStr(
+      pickCell(
+        header,
+        'Sold-to Postal Code',
+        'Sold to Postal Code',
+        'Sold-to Zip',
+        'Sold to Zip',
+        'Sold-to ZIP',
+        'Bill-to Postal Code',
+        'Bill-to Zip',
+      ),
+      30,
+    );
+    const sold_to_country_name = toStr(
+      pickCell(
+        header,
+        'Sold-to Country',
+        'Sold to Country',
+        'Sold-to Country Name',
+        'Bill-to Country',
+        'Bill to Country',
+      ),
+      120,
+    );
+    const sold_to_country_code =
+      toStr(
+        pickCell(
+          header,
+          'Sold-to Country Code',
+          'Sold to Country Code',
+          'Bill-to Country Code',
+          'Bill to Country Code',
+        ),
+        10,
+      ) ||
+      countryCodeFromName(sold_to_country_name) ||
       null;
 
     return {
@@ -637,6 +763,14 @@ export class ExcelIngestService {
       postal_code,
       country_code,
       country_name,
+      sold_to_street1,
+      sold_to_street1_provided: rawSoldToStreet1 !== undefined,
+      sold_to_street2,
+      sold_to_city,
+      sold_to_state_region,
+      sold_to_postal_code,
+      sold_to_country_code,
+      sold_to_country_name,
     };
   }
 
@@ -704,6 +838,67 @@ export class ExcelIngestService {
         ...(m.country_name != null ? { country_name: m.country_name } : {}),
       },
     });
+
+    // The sold-to party's own address, stored as the customer's location
+    // whose code is the sold-to code (mirrors the ship-to location above).
+    // Only when the file actually carries a sold-to address — never create
+    // an empty location row for a file without the columns.
+    const hasSoldToAddress =
+      m.sold_to_street1_provided ||
+      m.sold_to_street2 != null ||
+      m.sold_to_city != null ||
+      m.sold_to_state_region != null ||
+      m.sold_to_postal_code != null ||
+      m.sold_to_country_code != null ||
+      m.sold_to_country_name != null;
+    if (hasSoldToAddress) {
+      const cleanSoldStreet1 =
+        m.sold_to_street1 &&
+        normalizeCode(m.sold_to_street1) !== normalizeCode(soldCode) &&
+        normalizeCode(m.sold_to_street1) !== normalizeCode(m.sold_to_name ?? null)
+          ? m.sold_to_street1
+          : null;
+      await tx.shipToLocation.upsert({
+        where: {
+          customer_id_ship_to_code: {
+            customer_id: customer.id,
+            ship_to_code: soldCode,
+          },
+        },
+        create: {
+          customer_id: customer.id,
+          ship_to_code: soldCode,
+          ship_to_name: m.sold_to_name ?? soldCode,
+          street1: cleanSoldStreet1,
+          street2: m.sold_to_street2,
+          city: m.sold_to_city,
+          state_region: m.sold_to_state_region,
+          postal_code: m.sold_to_postal_code,
+          country_code: m.sold_to_country_code,
+          country_name: m.sold_to_country_name,
+        },
+        update: {
+          ...(m.sold_to_name ? { ship_to_name: m.sold_to_name } : {}),
+          ...(m.sold_to_street1_provided
+            ? { street1: cleanSoldStreet1 }
+            : {}),
+          ...(m.sold_to_street2 != null ? { street2: m.sold_to_street2 } : {}),
+          ...(m.sold_to_city != null ? { city: m.sold_to_city } : {}),
+          ...(m.sold_to_state_region != null
+            ? { state_region: m.sold_to_state_region }
+            : {}),
+          ...(m.sold_to_postal_code != null
+            ? { postal_code: m.sold_to_postal_code }
+            : {}),
+          ...(m.sold_to_country_code != null
+            ? { country_code: m.sold_to_country_code }
+            : {}),
+          ...(m.sold_to_country_name != null
+            ? { country_name: m.sold_to_country_name }
+            : {}),
+        },
+      });
+    }
 
     return { customer, shipToLocation };
   }

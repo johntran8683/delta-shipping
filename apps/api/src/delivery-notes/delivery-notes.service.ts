@@ -1617,7 +1617,30 @@ export class DeliveryNotesService {
     const [packingCombinePeers, activePackSession, completedPackSessions] =
       await this.loadPackExtrasForDetail(id);
 
-    const serialized = this.serializeDeliveryNote(dn);
+    // The sold-to party's own address: the customer's location whose code
+    // is the sold-to code (written by the daily DN import). Null when the
+    // file never carried a sold-to address.
+    const soldToLocation = await this.prisma.shipToLocation.findFirst({
+      where: {
+        customer: { sold_to_code: dn.sold_to_code },
+        ship_to_code: dn.sold_to_code,
+      },
+      select: {
+        ship_to_name: true,
+        street1: true,
+        street2: true,
+        city: true,
+        state_region: true,
+        postal_code: true,
+        country_code: true,
+        country_name: true,
+      },
+    });
+
+    const serialized = this.serializeDeliveryNote({
+      ...dn,
+      sold_to_location: soldToLocation,
+    });
     const carrierAccounts =
       dn.customer?.customer_carrier_accounts?.map((a) => ({
         carrier_code: a.carrier_code,
@@ -3225,6 +3248,16 @@ export class DeliveryNotesService {
       country_code: string | null;
       country_name: string | null;
     } | null;
+    sold_to_location?: {
+      ship_to_name: string;
+      street1: string | null;
+      street2: string | null;
+      city: string | null;
+      state_region: string | null;
+      postal_code: string | null;
+      country_code: string | null;
+      country_name: string | null;
+    } | null;
     sold_to_code?: string;
     ship_to_code?: string;
     [key: string]: unknown;
@@ -3235,6 +3268,7 @@ export class DeliveryNotesService {
       priority_history,
       customer,
       ship_to_location,
+      sold_to_location,
       ...rest
     } = dn;
     const soldToCode = String(rest.sold_to_code ?? '');
@@ -3253,11 +3287,24 @@ export class DeliveryNotesService {
           country_name: ship_to_location.country_name,
         }
       : null;
+    const sold_to_location_out = sold_to_location
+      ? {
+          ship_to_name: sold_to_location.ship_to_name,
+          street1: sold_to_location.street1,
+          street2: sold_to_location.street2,
+          city: sold_to_location.city,
+          state_region: sold_to_location.state_region,
+          postal_code: sold_to_location.postal_code,
+          country_code: sold_to_location.country_code,
+          country_name: sold_to_location.country_name,
+        }
+      : null;
     return {
       ...rest,
       sold_to_name,
       ship_to_name,
       ship_to_location: ship_to_location_out,
+      sold_to_location: sold_to_location_out,
       lines: lines.map((line) => {
         const l = line as Record<string, unknown>;
         return {

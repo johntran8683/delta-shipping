@@ -94,6 +94,35 @@ export function sheetHasStreetImportColumn(keys: string[]): boolean {
   return false;
 }
 
+/**
+ * Column headers that populate the sold-to party's own address during the
+ * daily DN import. Stored as the customer's `ship_to_locations` row whose
+ * ship_to_code is the sold-to code (mirrors the ship-to side).
+ */
+const SOLD_TO_STREET_IMPORT_HEADER_LABELS = [
+  'Sold-to Street',
+  'Sold to Street',
+  'Sold-to-Street',
+  'Bill-to Street',
+  'Bill to Street',
+  'Bill-to-Street',
+  'Sold-to Address 1',
+  'Sold to Address 1',
+  'Bill-to Address 1',
+  'Bill to Address 1',
+] as const;
+
+/** True if the worksheet defines at least one street column we read for sold-to. */
+export function sheetHasSoldToStreetImportColumn(keys: string[]): boolean {
+  const norms = SOLD_TO_STREET_IMPORT_HEADER_LABELS.map((l) =>
+    normHeader(l),
+  );
+  for (const k of keys) {
+    if (norms.includes(normHeader(k))) return true;
+  }
+  return false;
+}
+
 /** SAP Sold-to partner code column (not customer name). */
 export function sheetHasSoldToCodeColumn(keys: string[]): boolean {
   const want = new Set([normHeader('Sold-to'), normHeader('Sold to')]);
