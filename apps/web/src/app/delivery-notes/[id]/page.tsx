@@ -590,30 +590,31 @@ function RecordedBoxesCard({
           <div className="flex shrink-0 items-center">{rateEstimator}</div>
         ) : null}
       </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3 border-b border-slate-100 px-4 py-3.5 dark:border-slate-800/80">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-            Total boxes
-          </p>
-          <p className="mt-0.5 text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-            {boxes.length}
-          </p>
-        </div>
-        {weight ? (
+      <div className="grid sm:grid-cols-[230px_minmax(0,1fr)]">
+        <div className="space-y-3.5 border-b border-slate-100 px-4 py-3.5 dark:border-slate-800/80 sm:border-b-0 sm:border-r">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Total weight
+              Total boxes
             </p>
             <p className="mt-0.5 text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-              {weight.lb} lb
-              <span className="ml-1.5 text-xs font-medium text-slate-400 dark:text-slate-500">
-                ({weight.kg} kg)
-              </span>
+              {boxes.length}
             </p>
           </div>
-        ) : null}
-        {sizeGroups.length > 0 ? (
-          <div className="col-span-2">
+          {weight ? (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Total weight
+              </p>
+              <p className="mt-0.5 text-base font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                {weight.lb} lb
+                <span className="ml-1.5 text-xs font-medium text-slate-400 dark:text-slate-500">
+                  ({weight.kg} kg)
+                </span>
+              </p>
+            </div>
+          ) : null}
+          {sizeGroups.length > 0 ? (
+            <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Sizes (in)
               </p>
@@ -637,8 +638,8 @@ function RecordedBoxesCard({
               </div>
             </div>
           ) : null}
-      </div>
-      <div className="overflow-x-auto">
+        </div>
+        <div className="overflow-x-auto">
           <table className="w-full min-w-[280px] border-collapse text-left">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
@@ -700,6 +701,7 @@ function RecordedBoxesCard({
             </tbody>
           </table>
         </div>
+      </div>
     </div>
   );
 }
@@ -2610,9 +2612,8 @@ export default function DeliveryNoteDetailPage() {
   }
 
   /** The pack-result card exists on PACKED / SHIPPING_IN_PROGRESS notes
-      with a completed session — those are the notes whose Lines and
-      Pack result cards sit side by side in one row inside the left
-      column (next to the workflow rail, never under it). */
+      with a completed session — those are the notes whose Pack result
+      card sits above the Lines card in the left column. */
   const hasPackResult =
     detail != null &&
     (detail.current_status === "PACKED" ||
@@ -2721,45 +2722,37 @@ export default function DeliveryNoteDetailPage() {
                 />
               ) : null}
               {hasPackResult && detail.completed_pack_sessions?.[0] ? (
-                <div className="grid items-start gap-4 2xl:grid-cols-[minmax(0,1fr)_340px]">
-                  <div className="min-w-0">
-                    <DnLinesCard detail={detail} />
-                  </div>
-                  <div className="min-w-0">
-                    <CompletedPackResultBanner
-                      session={detail.completed_pack_sessions[0]}
-                      currentDnId={detail.id}
-                      totalSessionCount={detail.completed_pack_sessions.length}
-                      editable={
-                        detail.current_status === "PACKED" &&
-                        canEditPackResult()
-                      }
-                      onEdit={
-                        canEditPackResult() &&
-                        detail.current_status === "PACKED"
-                          ? openEditPackResultModal
-                          : undefined
-                      }
-                      readOnly={
-                        detail.current_status === "SHIPPING_IN_PROGRESS"
-                      }
-                      onPackingList={() => setPackingListOpen(true)}
-                      rateEstimator={
-                        detail.current_status === "SHIPPING_IN_PROGRESS" ? (
-                          <RateQuoteEstimator
-                            deliveryNoteId={detail.id}
-                            selected={shipRateQuote}
-                            onSelect={setShipRateQuote}
-                            primaryButton
-                          />
-                        ) : undefined
-                      }
-                    />
-                  </div>
-                </div>
-              ) : (
-                <DnLinesCard detail={detail} />
-              )}
+                <CompletedPackResultBanner
+                  session={detail.completed_pack_sessions[0]}
+                  currentDnId={detail.id}
+                  totalSessionCount={detail.completed_pack_sessions.length}
+                  editable={
+                    detail.current_status === "PACKED" &&
+                    canEditPackResult()
+                  }
+                  onEdit={
+                    canEditPackResult() &&
+                    detail.current_status === "PACKED"
+                      ? openEditPackResultModal
+                      : undefined
+                  }
+                  readOnly={
+                    detail.current_status === "SHIPPING_IN_PROGRESS"
+                  }
+                  onPackingList={() => setPackingListOpen(true)}
+                  rateEstimator={
+                    detail.current_status === "SHIPPING_IN_PROGRESS" ? (
+                      <RateQuoteEstimator
+                        deliveryNoteId={detail.id}
+                        selected={shipRateQuote}
+                        onSelect={setShipRateQuote}
+                        primaryButton
+                      />
+                    ) : undefined
+                  }
+                />
+              ) : null}
+              <DnLinesCard detail={detail} />
             </div>
             <div className="min-w-0 xl:sticky xl:top-4">
               <DnWorkflowRail
