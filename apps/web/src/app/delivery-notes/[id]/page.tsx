@@ -2611,7 +2611,8 @@ export default function DeliveryNoteDetailPage() {
 
   /** The pack-result card exists on PACKED / SHIPPING_IN_PROGRESS notes
       with a completed session — those are the notes whose Lines and
-      Pack result cards sit side by side in one row below. */
+      Pack result cards sit side by side in one row inside the left
+      column (next to the workflow rail, never under it). */
   const hasPackResult =
     detail != null &&
     (detail.current_status === "PACKED" ||
@@ -2719,38 +2720,8 @@ export default function DeliveryNoteDetailPage() {
                   currentDnId={detail.id}
                 />
               ) : null}
-              {!hasPackResult ? <DnLinesCard detail={detail} /> : null}
-            </div>
-            <div className="min-w-0 xl:sticky xl:top-4">
-              <DnWorkflowRail
-                status={detail.current_status}
-                onHoldFromStatus={detail.on_hold_from_status}
-                isRushed={detail.is_rushed}
-                rushReason={detail.latest_rush_reason}
-                currentPriorityNo={detail.current_priority_no}
-                allowedNextStatuses={detail.allowedNextStatuses}
-                canSetPriority={detail.canSetPriority}
-                canMarkRush={detail.canMarkRush}
-                canClearRush={detail.canClearRush}
-                busy={busy}
-                onPrimaryAction={handleRailPrimaryAction}
-                onTransition={supervisorStatusTransition}
-                onUnpack={() => {
-                  void postTransition("PICKED");
-                }}
-                onReturnToPacked={() => {
-                  void postTransition("PACKED");
-                }}
-                onPrioritySave={savePriorityFromModal}
-                onRushSave={saveRushFromModal}
-                handoff={detail.workflow_handoff}
-                statusHistory={detail.status_history as StatusHistoryEntry[]}
-                shipment={detail.latest_shipment}
-              />
-            </div>
-            {hasPackResult && detail.completed_pack_sessions?.[0] ? (
-              <div className="min-w-0 xl:col-span-2">
-                <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+              {hasPackResult && detail.completed_pack_sessions?.[0] ? (
+                <div className="grid items-start gap-4 2xl:grid-cols-[minmax(0,1fr)_340px]">
                   <div className="min-w-0">
                     <DnLinesCard detail={detail} />
                   </div>
@@ -2786,8 +2757,37 @@ export default function DeliveryNoteDetailPage() {
                     />
                   </div>
                 </div>
-              </div>
-            ) : null}
+              ) : (
+                <DnLinesCard detail={detail} />
+              )}
+            </div>
+            <div className="min-w-0 xl:sticky xl:top-4">
+              <DnWorkflowRail
+                status={detail.current_status}
+                onHoldFromStatus={detail.on_hold_from_status}
+                isRushed={detail.is_rushed}
+                rushReason={detail.latest_rush_reason}
+                currentPriorityNo={detail.current_priority_no}
+                allowedNextStatuses={detail.allowedNextStatuses}
+                canSetPriority={detail.canSetPriority}
+                canMarkRush={detail.canMarkRush}
+                canClearRush={detail.canClearRush}
+                busy={busy}
+                onPrimaryAction={handleRailPrimaryAction}
+                onTransition={supervisorStatusTransition}
+                onUnpack={() => {
+                  void postTransition("PICKED");
+                }}
+                onReturnToPacked={() => {
+                  void postTransition("PACKED");
+                }}
+                onPrioritySave={savePriorityFromModal}
+                onRushSave={saveRushFromModal}
+                handoff={detail.workflow_handoff}
+                statusHistory={detail.status_history as StatusHistoryEntry[]}
+                shipment={detail.latest_shipment}
+              />
+            </div>
           </div>
         ) : null}
       </div>
