@@ -114,6 +114,17 @@ export class CustomersService {
         city: true,
         state_region: true,
         country_code: true,
+        carrier_accounts: {
+          where: { is_active: true },
+          orderBy: [{ carrier_code: 'asc' }, { account_number: 'asc' }],
+          select: {
+            id: true,
+            carrier_code: true,
+            account_number: true,
+            is_collect_enabled: true,
+            is_active: true,
+          },
+        },
       },
     });
     return { items: rows };
@@ -129,6 +140,15 @@ export class CustomersService {
             { carrier_code: 'asc' },
             { account_number: 'asc' },
           ],
+          include: {
+            ship_to_location: {
+              select: {
+                id: true,
+                ship_to_code: true,
+                ship_to_name: true,
+              },
+            },
+          },
         },
         _count: { select: { ship_to_locations: true, delivery_notes: true } },
       },
@@ -156,6 +176,14 @@ export class CustomersService {
         id: a.id,
         carrier_code: a.carrier_code,
         account_number: a.account_number,
+        ship_to_location_id: a.ship_to_location_id,
+        ship_to_location: a.ship_to_location
+          ? {
+              id: a.ship_to_location.id,
+              ship_to_code: a.ship_to_location.ship_to_code,
+              ship_to_name: a.ship_to_location.ship_to_name,
+            }
+          : null,
         is_collect_enabled: a.is_collect_enabled,
         notes: a.notes,
         is_active: a.is_active,
@@ -210,6 +238,26 @@ export class CustomersService {
     return this.getCustomer(id);
   }
 
+  /**
+   * A carrier account may only link to a location of the same customer.
+   * Throws NotFound when the location does not exist or belongs to another
+   * customer (indistinguishable on purpose).
+   */
+  private async assertLocationBelongsToCustomer(
+    customerId: string,
+    locationId: string,
+  ): Promise<void> {
+    const loc = await this.prisma.shipToLocation.findFirst({
+      where: { id: locationId, customer_id: customerId },
+      select: { id: true },
+    });
+    if (!loc) {
+      throw new NotFoundException(
+        'Ship-to location not found for this customer',
+      );
+    }
+  }
+
   async createCarrierAccount(customerId: string, dto: CreateCarrierAccountDto) {
     const customer = await this.prisma.customer.findUnique({
       where: { id: customerId },
@@ -226,6 +274,13 @@ export class CustomersService {
         'carrier_code and account_number are required',
       );
     }
+    const ship_to_location_id = dto.ship_to_location_id?.trim() || null;
+    if (ship_to_location_id) {
+      await this.assertLocationBelongsToCustomer(
+        customerId,
+        ship_to_location_id,
+      );
+    }
 
     try {
       await this.prisma.customerCarrierAccount.create({
@@ -233,6 +288,7 @@ export class CustomersService {
           customer_id: customerId,
           carrier_code,
           account_number,
+          ship_to_location_id,
           is_collect_enabled: dto.is_collect_enabled ?? true,
           notes: dto.notes?.trim() || null,
           is_active: true,
@@ -274,6 +330,17 @@ export class CustomersService {
         throw new ConflictException('account_number cannot be empty');
       }
       data.account_number = account_number;
+    }
+    if (dto.ship_to_location_id !== undefined) {
+      // Null moves the account back to customer-wide; a UUID moves it to
+      // that location (which must belong to this customer).
+      const locationId = dto.ship_to_location_id?.trim() || null;
+      if (locationId) {
+        await this.assertLocationBelongsToCustomer(customerId, locationId);
+      }
+      data.ship_to_location = locationId
+        ? { connect: { id: locationId } }
+        : { disconnect: true };
     }
     if (dto.is_collect_enabled !== undefined) {
       data.is_collect_enabled = dto.is_collect_enabled;

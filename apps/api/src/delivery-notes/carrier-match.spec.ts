@@ -2,6 +2,7 @@ import {
   carrierMatchesShippingType,
   filterCarrierAccountsForShippingType,
   inferCarrierCodeFromShippingType,
+  resolveCarrierAccountsForLocation,
 } from './carrier-match';
 
 describe('carrierMatchesShippingType', () => {
@@ -46,5 +47,96 @@ describe('inferCarrierCodeFromShippingType', () => {
 
   it('returns OTHER when empty', () => {
     expect(inferCarrierCodeFromShippingType('')).toBe('OTHER');
+  });
+});
+
+describe('resolveCarrierAccountsForLocation', () => {
+  const accounts = [
+    {
+      carrier_code: 'FEDEX',
+      account_number: '111',
+      ship_to_location_id: null,
+    },
+    {
+      carrier_code: 'FEDEX',
+      account_number: '222',
+      ship_to_location_id: 'loc-1',
+    },
+    {
+      carrier_code: 'FEDEX',
+      account_number: '333',
+      ship_to_location_id: 'loc-2',
+    },
+    {
+      carrier_code: 'UPS',
+      account_number: '444',
+      ship_to_location_id: 'loc-1',
+    },
+  ];
+
+  it("puts the note's location account first, then customer-wide", () => {
+    expect(
+      resolveCarrierAccountsForLocation(accounts, 'FedEx Express', 'loc-1'),
+    ).toEqual([
+      {
+        carrier_code: 'FEDEX',
+        account_number: '222',
+        ship_to_location_id: 'loc-1',
+      },
+      {
+        carrier_code: 'FEDEX',
+        account_number: '111',
+        ship_to_location_id: null,
+      },
+    ]);
+  });
+
+  it('excludes accounts of other locations', () => {
+    const res = resolveCarrierAccountsForLocation(
+      accounts,
+      'FedEx Express',
+      'loc-1',
+    );
+    expect(res.map((a) => a.account_number)).toEqual(['222', '111']);
+  });
+
+  it('falls back to customer-wide when the location has none', () => {
+    expect(
+      resolveCarrierAccountsForLocation(accounts, 'FedEx Express', 'loc-9'),
+    ).toEqual([
+      {
+        carrier_code: 'FEDEX',
+        account_number: '111',
+        ship_to_location_id: null,
+      },
+    ]);
+  });
+
+  it('behaves like the plain filter when the note has no location', () => {
+    expect(
+      resolveCarrierAccountsForLocation(accounts, 'FedEx Express', null),
+    ).toEqual([
+      {
+        carrier_code: 'FEDEX',
+        account_number: '111',
+        ship_to_location_id: null,
+      },
+      {
+        carrier_code: 'FEDEX',
+        account_number: '222',
+        ship_to_location_id: 'loc-1',
+      },
+      {
+        carrier_code: 'FEDEX',
+        account_number: '333',
+        ship_to_location_id: 'loc-2',
+      },
+    ]);
+  });
+
+  it('returns empty when ship type missing', () => {
+    expect(resolveCarrierAccountsForLocation(accounts, null, 'loc-1')).toEqual(
+      [],
+    );
   });
 });

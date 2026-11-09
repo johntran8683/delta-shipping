@@ -1,6 +1,8 @@
 export type CarrierAccountRow = {
   carrier_code: string;
   account_number: string;
+  /** The ship-to location this account belongs to; null = customer-wide. */
+  ship_to_location_id?: string | null;
 };
 
 export function normalizeCarrierToken(value: string): string {
@@ -28,6 +30,32 @@ export function filterCarrierAccountsForShippingType(
   return accounts.filter((a) =>
     carrierMatchesShippingType(a.carrier_code, shippingType),
   );
+}
+
+/**
+ * Accounts for one delivery note, location first. Accounts linked to the
+ * note's ship-to location come before customer-wide accounts (those with no
+ * location), so the first match is the location's own account when it has
+ * one. Accounts linked to a *different* location are excluded: they belong
+ * to another site of the same customer.
+ */
+export function resolveCarrierAccountsForLocation(
+  accounts: readonly CarrierAccountRow[],
+  shippingType: string | null | undefined,
+  shipToLocationId: string | null | undefined,
+): CarrierAccountRow[] {
+  const matched = filterCarrierAccountsForShippingType(
+    accounts,
+    shippingType,
+  );
+  if (!shipToLocationId) return matched;
+  const locationAccounts = matched.filter(
+    (a) => a.ship_to_location_id === shipToLocationId,
+  );
+  const customerWideAccounts = matched.filter(
+    (a) => a.ship_to_location_id == null,
+  );
+  return [...locationAccounts, ...customerWideAccounts];
 }
 
 /** Best-effort carrier code for shipment records from free-text ship method. */

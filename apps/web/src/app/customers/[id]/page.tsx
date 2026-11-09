@@ -15,9 +15,21 @@ type CarrierAccount = {
   id: string;
   carrier_code: string;
   account_number: string;
+  ship_to_location_id: string | null;
+  ship_to_location?: {
+    id: string;
+    ship_to_code: string;
+    ship_to_name: string;
+  } | null;
   is_collect_enabled: boolean;
   notes: string | null;
   is_active: boolean;
+};
+
+type ShipToLocationRow = {
+  id: string;
+  ship_to_code: string;
+  ship_to_name: string;
 };
 
 type CustomerDetail = {
@@ -91,9 +103,17 @@ export default function CustomerDetailPage() {
   const [newAccountNumbers, setNewAccountNumbers] = useState<
     Record<string, string>
   >({});
+  /** Draft ship-to location per carrier for the inline add rows (""
+   * = customer-wide account). */
+  const [newAccountLocations, setNewAccountLocations] = useState<
+    Record<string, string>
+  >({});
+  /** Ship-to locations of this customer, for the account location pickers. */
+  const [locations, setLocations] = useState<ShipToLocationRow[]>([]);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState({
     account_number: "",
+    ship_to_location_id: null as string | null,
     notes: "",
     is_collect_enabled: true,
     is_active: true,
@@ -154,6 +174,23 @@ export default function CustomerDetailPage() {
       const d = body as CustomerDetail;
       setDetail(d);
       setBoxContent(d.requires_box_content === true);
+      // Ship-to locations for the account location pickers. A failure here
+      // must not block the page: without locations, accounts can still be
+      // added customer-wide.
+      try {
+        const locRes = await fetch(
+          `${apiBase}/customers/${customerId}/ship-to-locations`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (locRes.ok) {
+          const locBody = (await locRes.json().catch(() => ({}))) as {
+            items?: ShipToLocationRow[];
+          };
+          setLocations(Array.isArray(locBody.items) ? locBody.items : []);
+        }
+      } catch {
+        /* leave locations empty */
+      }
       setProfile({
         sold_to_name: d.sold_to_name ?? "",
         fed_id_number: d.fed_id_number ?? "",
@@ -267,6 +304,8 @@ export default function CustomerDetailPage() {
 
   async function addCarrierAccountForCarrier(carrierCode: string) {
     const accountNumber = (newAccountNumbers[carrierCode] ?? "").trim();
+    const shipToLocationId =
+      (newAccountLocations[carrierCode] ?? "").trim() || null;
     const token = getAccessToken();
     if (!token || !customerId || !canWrite || !accountNumber) return;
     setSaving(true);
@@ -283,6 +322,7 @@ export default function CustomerDetailPage() {
           body: JSON.stringify({
             carrier_code: carrierCode,
             account_number: accountNumber,
+            ship_to_location_id: shipToLocationId,
             notes: null,
           }),
         },
@@ -294,6 +334,7 @@ export default function CustomerDetailPage() {
       }
       setDetail(body as CustomerDetail);
       setNewAccountNumbers((d) => ({ ...d, [carrierCode]: "" }));
+      setNewAccountLocations((d) => ({ ...d, [carrierCode]: "" }));
       setSavedOk(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Add account failed");
@@ -338,6 +379,7 @@ export default function CustomerDetailPage() {
     setEditingAccountId(a.id);
     setEditDraft({
       account_number: a.account_number,
+      ship_to_location_id: a.ship_to_location_id ?? null,
       notes: a.notes ?? "",
       is_collect_enabled: a.is_collect_enabled,
       is_active: a.is_active,
@@ -607,8 +649,9 @@ export default function CustomerDetailPage() {
                 Courier accounts
               </h2>
               <p className="mt-1 text-xs text-slate-500">
-                Used when shippers create collect shipments. Soft-deactivate
-                instead of deleting.
+                Used when shippers create collect shipments. An account can
+                belong to one ship-to location, or to all locations when no
+                location is picked. Soft-deactivate instead of deleting.
               </p>
 
               <div className="mt-4 space-y-4">
@@ -644,6 +687,29 @@ export default function CustomerDetailPage() {
                               }))
                             }
                           />
+                          <label className="block text-xs font-medium text-slate-500">
+                            Ship-to location
+                            <select
+                              className={fieldClass + " mt-1"}
+                              value={editDraft.ship_to_location_id ?? ""}
+                              onChange={(e) =>
+                                setEditDraft((d) => ({
+                                  ...d,
+                                  ship_to_location_id:
+                                    e.target.value || null,
+                                }))
+                              }
+                            >
+                              <option value="">
+                                All locations (customer-wide)
+                              </option>
+                              {locations.map((loc) => (
+                                <option key={loc.id} value={loc.id}>
+                                  {loc.ship_to_code} — {loc.ship_to_name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
                           <textarea
                             className={fieldClass}
                             placeholder="Notes"
@@ -706,6 +772,18 @@ export default function CustomerDetailPage() {
                               <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                                 {a.carrier_code}
                               </span>
+                              {a.ship_to_location ? (
+                                <span
+                                  title={a.ship_to_location.ship_to_name}
+                                  className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-400"
+                                >
+                                  {a.ship_to_location.ship_to_code}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-400">
+                                  All locations
+                                </span>
+                              )}
                               {!a.is_active ? (
                                 <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-400">
                                   Inactive
@@ -781,6 +859,30 @@ export default function CustomerDetailPage() {
                               }))
                             }
                           />
+                          <label
+                            className="sr-only"
+                            htmlFor={`new-acct-loc-${carrier}`}
+                          >
+                            Ship-to location for {carrier}
+                          </label>
+                          <select
+                            id={`new-acct-loc-${carrier}`}
+                            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900"
+                            value={newAccountLocations[carrier] ?? ""}
+                            onChange={(e) =>
+                              setNewAccountLocations((d) => ({
+                                ...d,
+                                [carrier]: e.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">All locations</option>
+                            {locations.map((loc) => (
+                              <option key={loc.id} value={loc.id}>
+                                {loc.ship_to_code} — {loc.ship_to_name}
+                              </option>
+                            ))}
+                          </select>
                           <button
                             type="submit"
                             disabled={

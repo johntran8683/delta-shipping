@@ -260,6 +260,7 @@ model ShipToLocation {
 
   customer       Customer       @relation(fields: [customer_id], references: [id], onDelete: Restrict)
   delivery_notes DeliveryNote[]
+  carrier_accounts CustomerCarrierAccount[]
 
   @@unique([customer_id, ship_to_code])
   @@index([customer_id])
@@ -271,6 +272,9 @@ model CustomerCarrierAccount {
   customer_id        String   @db.Uuid
   carrier_code       String   @db.VarChar(30)
   account_number     String   @db.VarChar(80)
+  /// The ship-to location this account belongs to. NULL = customer-wide:
+  /// the account applies to every location of the customer.
+  ship_to_location_id String? @db.Uuid
   is_collect_enabled Boolean  @default(true)
   notes              String?
   is_active          Boolean  @default(true)
@@ -278,9 +282,11 @@ model CustomerCarrierAccount {
   updated_at         DateTime @updatedAt
 
   customer Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  ship_to_location ShipToLocation? @relation(fields: [ship_to_location_id], references: [id], onDelete: Restrict)
 
   @@unique([customer_id, carrier_code, account_number])
   @@index([customer_id])
+  @@index([ship_to_location_id])
   @@map("customer_carrier_accounts")
 }
 

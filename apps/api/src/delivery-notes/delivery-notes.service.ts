@@ -16,8 +16,8 @@ import { PrismaService } from '../prisma/prisma.service';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import PDFKit = require('pdfkit');
 import {
-  filterCarrierAccountsForShippingType,
   inferCarrierCodeFromShippingType,
+  resolveCarrierAccountsForLocation,
 } from './carrier-match';
 import { attachDeliveryNoteStatusContexts } from './delivery-notes-status-context';
 import { buildDeliveryNoteListOrderBy } from './delivery-notes-list-sort';
@@ -1525,7 +1525,11 @@ export class DeliveryNotesService {
             fed_id_number: true,
             customer_carrier_accounts: {
               where: { is_active: true },
-              select: { carrier_code: true, account_number: true },
+              select: {
+                carrier_code: true,
+                account_number: true,
+                ship_to_location_id: true,
+              },
               orderBy: [{ carrier_code: 'asc' }, { account_number: 'asc' }],
             },
           },
@@ -1645,10 +1649,13 @@ export class DeliveryNotesService {
       dn.customer?.customer_carrier_accounts?.map((a) => ({
         carrier_code: a.carrier_code,
         account_number: a.account_number,
+        ship_to_location_id: a.ship_to_location_id,
       })) ?? [];
-    const matched_carrier_accounts = filterCarrierAccountsForShippingType(
+    // The note's own ship-to location accounts first, then customer-wide.
+    const matched_carrier_accounts = resolveCarrierAccountsForLocation(
       carrierAccounts,
       dn.shipping_type,
+      dn.ship_to_location_id,
     );
 
     const latestShipmentRow = await this.prisma.shipment.findFirst({
@@ -1898,7 +1905,11 @@ export class DeliveryNotesService {
           select: {
             customer_carrier_accounts: {
               where: { is_active: true },
-              select: { carrier_code: true, account_number: true },
+              select: {
+                carrier_code: true,
+                account_number: true,
+                ship_to_location_id: true,
+              },
             },
           },
         },
@@ -1962,9 +1973,10 @@ export class DeliveryNotesService {
         );
       }
 
-      const accounts = filterCarrierAccountsForShippingType(
+      const accounts = resolveCarrierAccountsForLocation(
         m.customer?.customer_carrier_accounts ?? [],
         m.shipping_type,
+        m.ship_to_location_id,
       );
       const collectAccount = accounts[0]?.account_number?.trim() || null;
 
